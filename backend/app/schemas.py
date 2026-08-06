@@ -246,6 +246,65 @@ class FeedResponse(BaseModel):
     has_more: bool
 
 
+class MessagingSettingsUpdate(BaseModel):
+    """Toggle the creator's DM policy: who may start a conversation."""
+
+    allow_messages_from_all_followers: bool
+
+
+class MessagingSettingsOut(BaseModel):
+    """The creator's current DM policy."""
+
+    allow_messages_from_all_followers: bool
+
+
+class MessageSend(BaseModel):
+    """Send a DM to another user (creator <-> subscriber)."""
+
+    recipient_id: int
+    body: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("body")
+    @classmethod
+    def _body_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Message body must not be empty")
+        return value.strip()
+
+
+class MessageOut(BaseModel):
+    id: int
+    conversation_id: int
+    sender_id: int
+    recipient_id: int
+    body: str
+    read_at: datetime | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class UserSummaryOut(BaseModel):
+    id: int
+    username: str | None
+
+
+class ConversationOut(BaseModel):
+    """A 1:1 DM thread from one participant's perspective.
+
+    ``other`` is the other party in the thread (computed per requester);
+    ``last_message`` is the most recent message for inbox previews.
+    """
+
+    id: int
+    creator_id: int
+    subscriber_id: int
+    created_at: datetime
+    updated_at: datetime
+    other: UserSummaryOut
+    last_message: MessageOut | None
+
+
 class GatewayFieldOut(BaseModel):
     """One credential field of a creator's gateway settings form.
 

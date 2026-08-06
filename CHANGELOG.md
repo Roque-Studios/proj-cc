@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.11.0] - 2026-08-06
+### Added
+- Real-time DM delivery: `WS /api/ws/dms?token=<access JWT>` streams live messages between creators and followers; sends persist through the **same DM gate** as REST (non-followers/policy blocks get an `error` frame, nothing persisted), `4401` for missing/invalid/revoked tokens
+- Shared `deps.user_from_access_token` — the REST bearer and WS query-token auth now use the same validation core (no drift between transports)
+- `app/realtime.py` RealtimeManager: local-first delivery + best-effort Redis pub/sub relay (`dm:user:{id}` channels) for cross-worker (multi-gunicorn) delivery, bounded-deque dedupe so local push + relay feedback never double-deliver, 5 s per-socket send timeout, throttled outage logging, relay tracking pruned when a user has no live sockets
+- `POST /messages` now pushes live to the recipient's connected sockets too; REST history (`GET /conversations/{id}/messages`) remains the fallback for disconnected recipients on reconnect
+- nginx `Upgrade` headers + Vite dev proxy `ws: true` for the WS endpoint
+- Coverage: `backend/tests/test_realtime.py` (12 tests: WS send → live receive, REST → live push, offline → REST on reconnect, auth guard, gate over WS, ping/pong, cross-manager relay, no double delivery, Redis-outage degradation, prune on disconnect) + `tests/fake_realtime.py` (in-memory pub/sub hub)
+
+## [0.10.0] - 2026-08-06
+### Added
+- Creator messaging-settings toggle: `GET/PUT /creator/messaging-settings` (creator-only) for `allow_messages_from_all_followers` — takes effect immediately (the DM gate reads the profile per send), existing threads never interrupted
+- Settings page (`settings.html`) Messaging card with an immediate-save switch (error reverts the toggle)
+- Coverage: `backend/tests/test_messaging_settings.py` — endpoint guards, default-off, both acceptance states (flip on → blocked follower sends immediately; flip off → new threads blocked immediately), existing-thread and creator-outbound unaffected
+
+## [0.9.0] - 2026-08-06
+### Added
+- DM data model: `Conversation` (unique creator+subscriber thread grouping) + `Message` (sender/recipient/body/read_at) + migration
+- `creator_profile.allow_messages_from_all_followers` policy (default off) — the messaging gate: a subscriber can always continue an existing thread, but starting one requires an active subscription **and** (when the setting is off) is blocked with a clear 403; creators can always message subscribers (creator↔creator rejected)
+- Shared `access.is_active_follower` helper — the single follower definition used by the content and DM gates
+- `POST /messages`, `GET /conversations` (other party + last-message preview), `GET /conversations/{id}/messages` (participants only, 404 for outsiders)
+- Coverage: `backend/tests/test_messages.py` (17 tests: gate block/clear error, setting-on new thread, existing-thread carve-out incl. lapsed subscription, follower requirement, creator↔creator rejection, thread grouping, read scoping)
+
 ## [0.8.0] - 2026-08-06
 ### Added
 - Per-creator payment gateway settings: `CreatorGatewayConfig` model + migration; each creator enables/configures Stripe / PayPal / Wompi (plus the zero-config `mock` dev gateway) with **strictly per-creator credentials** — no env fallback for checkout

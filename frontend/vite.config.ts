@@ -9,6 +9,7 @@ export default defineConfig({
       '/api': {
         target: process.env.API_TARGET || 'http://localhost:8000',
         changeOrigin: true,
+        ws: true, // WebSocket upgrade for the DM realtime endpoint
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
     },

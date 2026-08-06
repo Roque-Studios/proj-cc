@@ -69,6 +69,23 @@ def _period_is_current(subscription: Subscription) -> bool:
     return period_end > datetime.now(timezone.utc)
 
 
+def is_active_follower(db: Session, subscriber_id: int, creator_id: int) -> bool:
+    """True when the user is an active (or trialing) follower of the creator.
+
+    The single definition of "follower" shared by every access gate (content
+    media, DMs, ...): an active/trialing subscription whose current period
+    hasn't ended. Kept in one place so the definition can't drift.
+    """
+    subscription = db.scalar(
+        select(Subscription).where(
+            Subscription.subscriber_id == subscriber_id,
+            Subscription.creator_id == creator_id,
+            Subscription.status.in_(_FOLLOWER_STATUSES),
+        )
+    )
+    return subscription is not None and _period_is_current(subscription)
+
+
 def _resolve_creator_id(request: Request, creator_id: int | None) -> int | None:
     if creator_id is not None:
         return creator_id

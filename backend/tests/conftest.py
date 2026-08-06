@@ -25,8 +25,10 @@ from app.config import settings
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
+    Conversation,
     CreatorGatewayConfig,
     CreatorProfile,
+    Message,
     PaidUnlock,
     Post,
     PostMedia,
@@ -34,6 +36,7 @@ from app.models import (
     Subscription,
     User,
 )
+from tests.fake_realtime import FakePubSubHub
 from tests.fake_redis import FakeRedis
 
 # Token revocation uses an in-memory denylist (no Redis needed in tests).
@@ -75,6 +78,8 @@ def _clean_db():
         db.query(PaidUnlock).delete()  # FKs to post + user
         db.query(PostMedia).delete()
         db.query(Post).delete()
+        db.query(Message).delete()  # FK to conversation + user
+        db.query(Conversation).delete()  # FK to user
         db.query(Subscription).delete()
         db.query(CreatorGatewayConfig).delete()  # FK to user
         db.query(CreatorProfile).delete()
@@ -103,6 +108,25 @@ def _fake_watermark_cache(monkeypatch):
     monkeypatch.setattr(cache_module, "_unavailable_logged", False)
     yield fake
     fake.clear()
+
+
+@pytest.fixture(autouse=True)
+def _fake_realtime(monkeypatch):
+    """The realtime manager runs on an in-memory pub/sub hub (no Redis).
+
+    Every test gets a fresh manager + hub so sockets and relay tasks never
+    leak across tests; the relay task is cancelled at teardown via ``shutdown``.
+    """
+    from app import realtime as realtime_module
+
+    hub = FakePubSubHub()
+    manager = realtime_module.RealtimeManager(
+        async_client_factory=lambda: hub.async_client(),
+        sync_client_factory=lambda: hub.sync_client(),
+    )
+    monkeypatch.setattr(realtime_module, "manager", manager)
+    yield manager
+    manager.shutdown()
 
 
 @pytest.fixture

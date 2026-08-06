@@ -6,6 +6,7 @@ import '../components/inputs/text-field.ts'
 import '../components/inputs/select.ts'
 import '../components/buttons/button.ts'
 import '../components/layouts/card.ts'
+import '../components/layouts/divider.ts'
 import '../components/feedback/toast.ts'
 import '../components/feedback/alert.ts'
 import '../components/feedback/spinner.ts'
@@ -26,6 +27,8 @@ export class CreatorGatewaySettings extends LitElement {
   @state() private settings: GatewaySettings[] = []
   @state() private form: Record<string, Record<string, string>> = {}
   @state() private enabled: Record<string, boolean> = {}
+  @state() private messagingOn = false
+  @state() private messagingBusy = false
   @state() private loading = true
   @state() private busy = false
   @state() private error = ''
@@ -154,7 +157,11 @@ export class CreatorGatewaySettings extends LitElement {
     this.loading = true
     this.error = ''
     try {
-      const settings = await api.getGatewaySettings()
+      const [settings, messaging] = await Promise.all([
+        api.getGatewaySettings(),
+        api.getMessagingSettings(),
+      ])
+      this.messagingOn = messaging.allow_messages_from_all_followers
       this.settings = settings.filter((g) => UI_GATEWAYS.includes(g.gateway))
       this.form = {}
       this.enabled = {}
@@ -272,6 +279,28 @@ export class CreatorGatewaySettings extends LitElement {
     }, 5000)
   }
 
+  private async _onMessagingToggle(e: CustomEvent) {
+    if (this.messagingBusy) return
+    const on = e.detail?.checked ?? false
+    const previous = this.messagingOn
+    this.messagingOn = on
+    this.messagingBusy = true
+    try {
+      const updated = await api.updateMessagingSettings(on)
+      this.messagingOn = updated.allow_messages_from_all_followers
+      this.toastHeading = 'Messaging settings saved'
+      this.toast = on
+        ? 'All followers can now start a conversation with you.'
+        : 'New conversations are now limited to existing threads.'
+      this._showToast()
+    } catch (err) {
+      this.messagingOn = previous
+      this._handleError(err)
+    } finally {
+      this.messagingBusy = false
+    }
+  }
+
   private _onLogout() {
     const refresh = localStorage.getItem('cc_refresh_token')
     if (refresh) {
@@ -334,6 +363,30 @@ export class CreatorGatewaySettings extends LitElement {
               @aero-dismiss="${() => (this.error = '')}"
             ></roque-alert>`
           : ''}
+
+        <roque-card heading="Messaging">
+          <p class="desc">
+            Control who can start a direct-message conversation with you. When
+            off, only followers you already have a conversation with can
+            message you — new threads are blocked. Toggling takes effect
+            immediately and never interrupts existing conversations.
+          </p>
+          <div class="footer-row">
+            <div class="switch-zone">
+              <roque-switch
+                label="Allow messages from all followers"
+                .checked="${this.messagingOn}"
+                ?disabled="${this.messagingBusy}"
+                @aero-change="${this._onMessagingToggle}"
+              ></roque-switch>
+              ${this.messagingBusy
+                ? html`<span class="switch-hint">saving…</span>`
+                : ''}
+            </div>
+          </div>
+        </roque-card>
+
+        <roque-divider orientation="horizontal" spacing="18"></roque-divider>
 
         <div class="grid">
           ${this.settings.map((g) => this._renderGatewayCard(g))}

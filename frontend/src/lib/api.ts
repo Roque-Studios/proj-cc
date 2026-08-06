@@ -95,6 +95,10 @@ export interface GatewaySettings {
   fields: GatewayField[]
 }
 
+export interface MessagingSettings {
+  allow_messages_from_all_followers: boolean
+}
+
 export const api = {
   login(email: string, password: string): Promise<TokenResponse> {
     return request<TokenResponse>('/auth/login', {
@@ -121,6 +125,17 @@ export const api = {
     return request<GatewaySettings>(`/creator/gateway-settings/${gateway}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
+    })
+  },
+
+  getMessagingSettings(): Promise<MessagingSettings> {
+    return request<MessagingSettings>('/creator/messaging-settings')
+  },
+
+  updateMessagingSettings(allow: boolean): Promise<MessagingSettings> {
+    return request<MessagingSettings>('/creator/messaging-settings', {
+      method: 'PUT',
+      body: JSON.stringify({ allow_messages_from_all_followers: allow }),
     })
   },
 }

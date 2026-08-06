@@ -25,7 +25,19 @@ def resolve_authenticated_user(
     """
     if credentials is None:
         return None
-    claims = decode_token(credentials.credentials)
+    return user_from_access_token(credentials.credentials, db)
+
+
+def user_from_access_token(token: str, db: Session) -> User | None:
+    """Resolve the user from a raw access-token string, or None.
+
+    Shared by the HTTP bearer path (``resolve_authenticated_user``) and the
+    WebSocket path (``?token=`` query — browsers can't send headers on WS), so
+    the two transports can never drift on what counts as authenticated.
+    """
+    if not token:
+        return None
+    claims = decode_token(token)
     if claims is None or claims.get("type") != "access":
         return None
     if is_token_revoked(claims.get("jti", "")):

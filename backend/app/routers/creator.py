@@ -1,10 +1,13 @@
-"""Creator endpoints: self-serve application, profile and gateway settings.
+"""Creator endpoints: self-serve application, profile, gateway and messaging settings.
 
 ``POST /creator/apply`` upgrades any authenticated user to ``creator`` (creating
 the profile stub). ``GET/PUT /creator/profile`` are creator-only. ``GET/PUT
 /creator/gateway-settings`` let a creator configure which payment gateways their
 subscribers can pay with — strictly per-creator credentials, so enabling a
 gateway requires its required config to be complete (see ``app.gateways``).
+``GET/PUT /creator/messaging-settings`` toggle the DM policy
+(``allow_messages_from_all_followers``); the toggle takes effect on the very
+next message attempt (the DM service reads the profile per send).
 """
 
 from __future__ import annotations
@@ -31,6 +34,8 @@ from ..schemas import (
     GatewayFieldOut,
     GatewaySettingsOut,
     GatewaySettingsUpdate,
+    MessagingSettingsOut,
+    MessagingSettingsUpdate,
 )
 
 router = APIRouter(prefix="/creator", tags=["creator"])
@@ -76,6 +81,44 @@ def update_profile(
     db.commit()
     db.refresh(profile)
     return profile
+
+
+# --------------------------------------------------------------------------- #
+# Messaging settings (DM policy toggle)
+# --------------------------------------------------------------------------- #
+
+
+@router.get("/messaging-settings", response_model=MessagingSettingsOut)
+def get_messaging_settings(
+    user: User = Depends(require_creator),
+    db: Session = Depends(get_db),
+):
+    """Creator-only: the current DM policy."""
+    profile = _get_or_create_profile(db, user)
+    return MessagingSettingsOut(
+        allow_messages_from_all_followers=profile.allow_messages_from_all_followers
+    )
+
+
+@router.put("/messaging-settings", response_model=MessagingSettingsOut)
+def update_messaging_settings(
+    payload: MessagingSettingsUpdate,
+    user: User = Depends(require_creator),
+    db: Session = Depends(get_db),
+):
+    """Creator-only: toggle whether all followers may start a conversation.
+
+    Takes effect immediately — the DM service reads this flag on every send.
+    Existing conversations are unaffected: continuing a thread is always
+    allowed, so toggling off never cuts off an in-flight DM.
+    """
+    profile = _get_or_create_profile(db, user)
+    profile.allow_messages_from_all_followers = payload.allow_messages_from_all_followers
+    db.commit()
+    db.refresh(profile)
+    return MessagingSettingsOut(
+        allow_messages_from_all_followers=profile.allow_messages_from_all_followers
+    )
 
 
 # --------------------------------------------------------------------------- #

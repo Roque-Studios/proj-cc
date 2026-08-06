@@ -6,7 +6,7 @@ from sqlalchemy import text
 from .database import get_db
 from .logger import setup_logging
 from sqlalchemy.orm import Session
-from .routers import admin, auth, content, creator, posts, subscriptions, viewer, webhooks
+from .routers import admin, auth, content, creator, messages, posts, realtime, subscriptions, viewer, webhooks
 
 setup_logging()
 logger = structlog.get_logger()
@@ -25,6 +25,8 @@ app.include_router(subscriptions.router)
 app.include_router(posts.router)
 app.include_router(content.router)
 app.include_router(admin.router)
+app.include_router(messages.router)
+app.include_router(realtime.router)
 
 
 @app.middleware("http")

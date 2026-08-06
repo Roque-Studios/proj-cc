@@ -456,6 +456,102 @@ runs when `WOMPI_CLIENT_ID` / `WOMPI_CLIENT_SECRET` are set **and**
 > **License note:** `pywompi` is GPL-3.0-or-later — keep that in mind if you
 distribute this project as a closed product.
 
+### Direct messages (creator ↔ subscriber, 1:1 threads)
+
+Creator-to-subscriber DMs with **thread grouping**: a `Conversation` is the
+unique `(creator_id, subscriber_id)` pair — every message between the same two
+people lands in that one thread, so starting a "new" thread for an existing
+pair is impossible (the unique constraint makes it idempotent). `Message`
+rows carry `sender_id` / `recipient_id`, the body, and a `read_at` marker.
+
+**The messaging gate** — a creator's `allow_messages_from_all_followers`
+setting (on `creator_profile`, default **off**) controls who can start a
+thread:
+
+- the **creator may always message** a subscriber — this is what creates the
+  "existing thread" a subscriber can later reply into;
+- a **subscriber** may always **continue an existing conversation** (the
+  acceptance carve-out: the block only applies when the sender isn't already
+  in a thread);
+- a subscriber with **no existing thread** must be an **active follower**
+  (active/trialing subscription with a current period) and, when the creator's
+  setting is off, is **blocked with a clear error** — `403 "This creator has
+  messaging turned off — you can only message them if you already have an
+  existing conversation"`;
+- DMs are strictly creator ↔ subscriber: a creator messaging another creator
+  is rejected (`400`), and the follower definition is the shared
+  `access.is_active_follower` helper used by every content gate.
+
+**The toggle** — `GET/PUT /api/creator/messaging-settings` (creator-only)
+reads/writes `allow_messages_from_all_followers`. Toggling takes effect
+**immediately**: the DM service reads the profile on every send, so the next
+message attempt reflects the new policy (no cache, no propagation delay), and
+existing conversations are never interrupted — continuing a thread is always
+allowed. The setting lives on the profile but is intentionally exposed only
+through these dedicated endpoints, not `GET/PUT /api/creator/profile`.
+
+**Endpoints** — `POST /messages` (`{recipient_id, body}`, `201`; blocked with
+a `403` as above; unknown recipient `404`); `GET /conversations` (the
+requester's threads, newest first, with the other party + a last-message
+preview); `GET /conversations/{id}/messages` (history, oldest first —
+participants only; an outsider gets the same `404` as a missing thread, so
+conversation ids don't leak).
+
+Covered by `backend/tests/test_messages.py` (the gate: setting off + no
+thread → blocked with the clear error; setting on → new thread; existing
+thread → allowed even with the setting off or a lapsed subscription; the
+follower requirement; creator↔creator rejection; thread grouping per pair;
+and the read endpoints' participant scoping) and
+`backend/tests/test_messaging_settings.py` (the toggle: endpoint guards,
+default off, and both acceptance states — flipping on lets a blocked follower
+through on the very next attempt, flipping off blocks a new thread
+immediately, while existing threads stay unaffected). The settings page at
+`/settings.html` has a Messaging card with the switch.
+
+### Real-time delivery (WebSocket)
+
+`WS /api/ws/dms?token=<access JWT>` streams DMs live between a creator and
+their followers (the query token because browsers can't send
+`Authorization` headers on WebSockets; missing/invalid/revoked token →
+close `4401`). The auth check is the **shared** `deps.user_from_access_token`
+used by the REST bearer path, so the two transports can't drift on what
+counts as authenticated.
+
+**Frames** — client → server: `{"type": "send", "recipient_id", "body"}`
+(persisted through the **same DM gate** as `POST /messages`, so a
+non-follower or a policy-blocked sender gets an `error` frame and nothing is
+written) and `{"type": "ping"}`. Server → client: `ack` (after a send
+persists), `message` (a new message in one of your conversations — from any
+device, worker, or the REST endpoint), `pong`, and `error` with a clear
+`detail`.
+
+**Delivery model — local-first with a best-effort Redis relay**
+(`app/realtime.py`). Every process (gunicorn worker) keeps a local registry
+of its live sockets and delivers to them first; then it publishes the frame
+on the recipient's Redis channel (`dm:user:{id}`) so sockets in **other
+workers** get it too. A per-process relay subscribes to the channels of the
+users connected locally and forwards what arrives. To avoid the local push
+and the relay both delivering in the same process, delivered message ids are
+remembered (a bounded deque) and the relay skips them. A single slow/hung
+client socket is bounded with a 5 s send timeout so it can't stall the
+recipient's other sockets or the REST send that awaits the push.
+
+Resilience mirrors the cache layer: Redis is **best-effort** — a publish or
+relay failure is caught, logged once (throttled during sustained outages),
+and degrades to local-only delivery; **disconnected recipients get the
+message via `GET /conversations/{id}/messages` on reconnect** (the persisted
+REST layer is the polling fallback). Users with no live sockets stop being
+tracked by the relay (no unbounded subscription growth).
+
+The reverse proxy is wired for upgrades: nginx forwards the `Upgrade`
+handshake on `/api/*` (dev: the Vite proxy sets `ws: true`). Covered by
+`backend/tests/test_realtime.py` — WS send → live receive, REST send → live
+push, offline → REST fetch on reconnect, `4401` auth guard, the DM gate over
+WS (follower + policy block, nothing persisted), ping/pong, cross-manager
+relay delivery (the multi-worker case), same-process no-double-delivery,
+Redis-outage degradation, and relay tracking pruned on disconnect — plus the
+in-memory pub/sub stand-in `backend/tests/fake_realtime.py`.
+
 ### Webhook handling — renewal, failure & idempotency
 
 Every provider webhook is **signature-verified** per gateway before anything

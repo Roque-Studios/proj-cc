@@ -358,11 +358,100 @@ class CreatorGatewayConfig(Base):
     creator = relationship("User", back_populates="gateway_configs")
 
 
+class Conversation(Base):
+    """A 1:1 DM thread between one creator and one subscriber.
+
+    The unique ``(creator_id, subscriber_id)`` pair is the **thread grouping**:
+    every message between the same two people lands in the same conversation,
+    and starting a new thread for an existing pair is impossible (the unique
+    constraint makes it idempotent). A conversation is what "an existing
+    thread" means for the messaging gate — a subscriber can only message a
+    creator whose ``allow_messages_from_all_followers`` setting is off if a
+    conversation already exists between them.
+    """
+
+    __tablename__ = "conversation"
+    __table_args__ = (
+        UniqueConstraint(
+            "creator_id",
+            "subscriber_id",
+            name="uq_conversation_creator_subscriber",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    creator_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    subscriber_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Touched on every message so the inbox can order threads by recency.
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    messages = relationship(
+        "Message",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="Message.id",
+    )
+
+
+class Message(Base):
+    """One DM within a conversation (creator <-> subscriber, 1:1).
+
+    ``sender_id`` / ``recipient_id`` are denormalized from the conversation for
+    cheap read-side rendering; the thread grouping lives on the Conversation
+    row.
+    """
+
+    __tablename__ = "message"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(
+        Integer,
+        ForeignKey("conversation.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    sender_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    recipient_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    body = Column(Text, nullable=False)
+    # Set once the recipient has seen the message (nullable until then).
+    read_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    conversation = relationship("Conversation", back_populates="messages")
+
+
 class CreatorProfile(Base):
     """Creator profile extension (one-to-one with User).
 
-    Holds the creator-facing fields: display name, bio, avatar and a payout
-    info placeholder that will be filled in by the payments integration.
+    Holds the creator-facing fields: display name, bio, avatar, a payout
+    info placeholder that will be filled in by the payments integration, and
+    the DM policy (``allow_messages_from_all_followers``).
     """
 
     __tablename__ = "creator_profile"
@@ -379,6 +468,12 @@ class CreatorProfile(Base):
     bio = Column(Text, nullable=True)
     avatar_url = Column(String(500), nullable=True)
     payout_info = Column(JSON, nullable=True)  # placeholder, e.g. {"method": "...", "email": "..."}
+    # DM policy: when True, every active follower may start a conversation.
+    # When False, followers can only continue an **existing** conversation
+    # (threads the creator started, or started while the setting was on).
+    allow_messages_from_all_followers = Column(
+        Boolean, default=False, nullable=False, server_default="false"
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
