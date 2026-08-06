@@ -40,6 +40,15 @@ celery_app.conf.update(
     # Results: keep them around for 1 day, then let Redis expire them.
     result_expires=86400,
     result_cache_max=1000,
+    # Beat: periodic tasks (run by the ``beat`` compose service).
+    beat_schedule={
+        "expire-canceled-subscriptions": {
+            "task": "tasks.expire_canceled_subscriptions",
+            # Run every hour; the sweep is idempotent and cheap, so an hourly
+            # check keeps cancellations accurate well within a billing day.
+            "schedule": 3600.0,
+        },
+    },
 )
 
 logger.info(

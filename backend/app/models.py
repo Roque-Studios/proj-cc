@@ -8,6 +8,7 @@ from sqlalchemy import (
     JSON,
     String,
     Text,
+    UniqueConstraint,
     func,
     Enum as SQLEnum,
 )
@@ -38,12 +39,142 @@ class User(Base):
     is_active = Column(Boolean, default=False, nullable=False)
     onboarding_complete = Column(Boolean, default=False, nullable=False)
     activation_token = Column(String, nullable=True)
+    # Gateway-neutral external customer id (e.g. the Stripe customer id),
+    # created lazily on first payment flow and cached here.
+    payment_customer_id = Column(String(255), nullable=True)
 
     creator_profile = relationship(
         "CreatorProfile",
         back_populates="user",
         uselist=False,
         cascade="all, delete-orphan",
+    )
+    # passive_deletes: user deletion is delegated to the DB (FK ON DELETE
+    # CASCADE). Tests bulk-delete children first since SQLite doesn't enforce FKs.
+    subscriptions = relationship(
+        "Subscription",
+        back_populates="subscriber",
+        foreign_keys="Subscription.subscriber_id",
+        passive_deletes=True,
+    )
+    creator_subscriptions = relationship(
+        "Subscription",
+        back_populates="creator",
+        foreign_keys="Subscription.creator_id",
+        passive_deletes=True,
+    )
+
+
+class SubscriptionStatus(enum.Enum):
+    active = "active"
+    trialing = "trialing"
+    incomplete = "incomplete"  # payment pending — not yet a follower
+    past_due = "past_due"
+    canceled = "canceled"
+    expired = "expired"
+
+
+class Subscription(Base):
+    """A subscriber's subscription to one specific creator.
+
+    Scoped per creator: a user holds one row per creator they subscribe to, so
+    each (subscriber_id, creator_id) pair is unique and a subscriber can have
+    independent statuses across different creators.
+    """
+
+    __tablename__ = "subscription"
+    __table_args__ = (
+        UniqueConstraint(
+            "subscriber_id",
+            "creator_id",
+            name="uq_subscription_subscriber_creator",
+        ),
+        # A gateway subscription id (or checkout session id, pre-adoption)
+        # uniquely identifies one local row per provider. Webhook reconciliation
+        # looks rows up by this ref, so ambiguity would corrupt it.
+        UniqueConstraint(
+            "payment_provider",
+            "external_ref",
+            name="uq_subscription_provider_ref",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    subscriber_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    creator_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    status = Column(
+        SQLEnum(SubscriptionStatus),
+        default=SubscriptionStatus.active,
+        server_default=SubscriptionStatus.active.value,
+        nullable=False,
+    )
+    current_period_start = Column(DateTime(timezone=True), nullable=True)
+    current_period_end = Column(DateTime(timezone=True), nullable=True)
+    payment_provider = Column(String(50), nullable=True)
+    external_ref = Column(String(255), index=True, nullable=True)
+    # Hosted checkout URL for the pending (incomplete) payment, returned to the
+    # client to complete. Cleared once the subscription activates.
+    checkout_url = Column(String(500), nullable=True)
+    # Non-renew flag: set when the subscriber cancels; the subscription stays
+    # active (access persists) until current_period_end, then a scheduled task
+    # flips the status to canceled.
+    cancel_at_period_end = Column(Boolean, default=False, nullable=False, server_default="false")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    subscriber = relationship(
+        "User",
+        back_populates="subscriptions",
+        foreign_keys=[subscriber_id],
+    )
+    creator = relationship(
+        "User",
+        back_populates="creator_subscriptions",
+        foreign_keys=[creator_id],
+    )
+
+
+class ProcessedWebhookEvent(Base):
+    """Idempotency ledger for verified webhook events.
+
+    Providers redeliver events when we don't answer 2xx or on transient
+    failures. Recording each processed ``(provider, event_id)`` pair lets the
+    webhook handler recognize retries and skip re-applying status changes (e.g.
+    no duplicate renewal / duplicate failure notifications). The marker is
+    written in the same transaction as the reconciliation it deduplicates.
+    """
+
+    __tablename__ = "processed_webhook_event"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "event_id",
+            name="uq_webhook_event_provider_id",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    provider = Column(String(50), nullable=False)
+    event_id = Column(String(255), nullable=False)
+    processed_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
     )
 
 

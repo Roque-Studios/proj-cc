@@ -14,39 +14,42 @@ from .token_store import is_token_revoked
 _bearer = HTTPBearer(auto_error=False)
 
 
+def resolve_authenticated_user(
+    credentials: HTTPAuthorizationCredentials | None,
+    db: Session,
+) -> User | None:
+    """Resolve the user from a Bearer access token without raising.
+
+    Returns None for missing/invalid/expired/revoked tokens, or inactive users.
+    Used by ``get_current_user`` and the viewer access resolver.
+    """
+    if credentials is None:
+        return None
+    claims = decode_token(credentials.credentials)
+    if claims is None or claims.get("type") != "access":
+        return None
+    if is_token_revoked(claims.get("jti", "")):
+        return None
+    try:
+        user_id = int(claims["sub"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    user = db.get(User, user_id)
+    if user is None or not user.is_active:
+        return None
+    return user
+
+
 def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: Session = Depends(get_db),
 ) -> User:
     """Resolve the authenticated user from a Bearer access token, else 401."""
-    if credentials is None:
+    user = resolve_authenticated_user(credentials, db)
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
-        )
-    claims = decode_token(credentials.credentials)
-    if claims is None or claims.get("type") != "access":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-        )
-    if is_token_revoked(claims.get("jti", "")):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has been revoked",
-        )
-    try:
-        user_id = int(claims["sub"])
-    except (KeyError, TypeError, ValueError):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-        )
-    user = db.get(User, user_id)
-    if user is None or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
         )
     return user
 

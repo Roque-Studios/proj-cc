@@ -91,3 +91,42 @@ class CreatorProfileUpdate(BaseModel):
     bio: str | None = Field(default=None, max_length=2000)
     avatar_url: str | None = Field(default=None, max_length=500)
     payout_info: dict | None = None
+
+
+class SubscribeRequest(BaseModel):
+    """Start a subscription to a creator at the single defined monthly tier."""
+
+    creator_id: int
+    success_url: str | None = None
+    cancel_url: str | None = None
+
+
+class CancelRequest(BaseModel):
+    """Cancel (non-renew) an existing subscription."""
+
+    subscription_id: int
+
+
+class SubscriptionOut(BaseModel):
+    id: int
+    subscriber_id: int
+    creator_id: int
+    status: str
+    current_period_start: datetime | None
+    current_period_end: datetime | None
+    payment_provider: str | None
+    external_ref: str | None
+    checkout_url: str | None
+    cancel_at_period_end: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SubscribeResponse(BaseModel):
+    """Result of starting a subscription: the pending row + hosted checkout url."""
+
+    subscription: SubscriptionOut
+    checkout_url: str | None
+    status: str

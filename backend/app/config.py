@@ -40,6 +40,34 @@ class Settings(BaseSettings):
     # JWT token revocation list (Redis; defaults to REDIS_URL, DB 3)
     TOKEN_REVOCATION_REDIS_URL: str = ""
 
+    # Payment gateway (mock | stripe | paypal). "mock" is the default so the
+    # stack runs with zero credentials; switching gateways is a config change
+    # only (see app/payments/factory.py).
+    PAYMENT_PROVIDER: str = "mock"
+    # Stripe credentials (required when PAYMENT_PROVIDER=stripe)
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_API_BASE: str = "https://api.stripe.com/v1"
+    # PayPal credentials (required when PAYMENT_PROVIDER=paypal)
+    PAYPAL_CLIENT_ID: str = ""
+    PAYPAL_CLIENT_SECRET: str = ""
+    PAYPAL_WEBHOOK_ID: str = ""
+    PAYPAL_ENVIRONMENT: str = "sandbox"
+
+    # Single subscription tier (monthly). The plan id is the gateway price id
+    # (e.g. a Stripe recurring price); the price is informational for the API.
+    SUBSCRIPTION_TIER_PLAN_ID: str = "price_monthly_tier"
+    SUBSCRIPTION_TIER_PRICE_CENTS: int = 500
+
+    # Payment-failure notifications (SMTP). All optional: when SMTP_HOST is
+    # empty the notify task degrades to a structured log (dev/mock setups).
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""
+    SMTP_TLS: bool = True
+
     @property
     def cors_origins(self) -> list[str]:
         """Parse ALLOWED_ORIGINS (comma-separated) into a list."""

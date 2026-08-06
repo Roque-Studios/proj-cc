@@ -22,7 +22,7 @@ from sqlalchemy.orm import sessionmaker
 from app import token_store
 from app.database import Base, get_db
 from app.main import app
-from app.models import CreatorProfile, User
+from app.models import CreatorProfile, ProcessedWebhookEvent, Subscription, User
 
 # Token revocation uses an in-memory denylist (no Redis needed in tests).
 token_store.reset_store_for_tests()
@@ -56,9 +56,11 @@ def _create_schema():
 
 @pytest.fixture(autouse=True)
 def _clean_db():
-    """Reset the user + creator_profile tables between tests (children first)."""
+    """Reset tables between tests (children first)."""
     yield
     with _TestSession() as db:
+        db.query(ProcessedWebhookEvent).delete()
+        db.query(Subscription).delete()
         db.query(CreatorProfile).delete()
         db.query(User).delete()
         db.commit()

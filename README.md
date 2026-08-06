@@ -42,9 +42,10 @@ a clear error** if any required variable is missing or empty.
 | `ACCESS_TOKEN_EXPIRE_MINUTES` / `REFRESH_TOKEN_EXPIRE_MINUTES` | `21600` / `10080` | JWT token lifetimes (minutes) |
 | `SENTRY_DSN` | unset | Sentry error tracking DSN |
 | `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD` | dev defaults | Bootstrap admin credentials — **override in production** |
-
-> Payment gateway keys and media storage paths will be added as environment
-> variables when those features are implemented.
+| `PAYMENT_PROVIDER` | `mock` | Active payment gateway: `mock`, `stripe`, or `paypal`. Switching is a config change only — the subscription business logic is gateway-agnostic |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_API_BASE` | empty / Stripe base | Stripe credentials — required when `PAYMENT_PROVIDER=stripe` |
+| `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` / `PAYPAL_WEBHOOK_ID` / `PAYPAL_ENVIRONMENT` | empty / `sandbox` | PayPal credentials — required when `PAYMENT_PROVIDER=paypal` |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` / `SMTP_TLS` | empty / `587` / … / `true` | Optional SMTP for payment-failure notifications. When `SMTP_HOST` is empty the notify task degrades to a structured log (dev/mock setups) |
 
 ### Security
 
@@ -63,7 +64,61 @@ docker compose exec api python -m pytest /app/tests -v
 ```
 
 Covers the auth endpoints (registration, duplicate-email rejection, password
-complexity, login/JWT, wrong-credentials 401, refresh, protected `/auth/me`).
+complexity, login/JWT, wrong-credentials 401, refresh, protected `/auth/me`),
+the role/creator model, token revocation, the subscription model, viewer
+access-level classification, and the payment gateway abstraction (mocked
+provider; business logic independent of any real gateway).
+
+## Payment gateway abstraction
+
+All payment flows go through the `PaymentProvider` interface in
+`backend/app/payments/base.py` (create customer, create/cancel subscription,
+verify webhook, charge one-time). Implementations: `mock` (in-memory, default),
+`stripe`, and `paypal` (httpx-based). `backend/app/services/subscriptions.py`
+is the only place that orchestrates the subscription lifecycle, and it depends
+**only** on the interface — so adding a gateway is a one-line registration in
+`app/payments/factory.py` plus a provider class, with zero business-logic
+changes. Set `PAYMENT_PROVIDER` to switch.
+
+### Stripe subscriptions
+
+`POST /api/webhooks/stripe` receives signed Stripe events (set it as your
+Stripe webhook endpoint, `invoice.paid` / `invoice.payment_failed` events are
+reconciled against local subscriptions). Stripe checkout collects the payment
+method on the hosted page; the customer is created once per user and cached on
+`user.payment_customer_id`. Provider webhooks are also available at
+`/api/webhooks/mock` (dev) and `/api/webhooks/paypal`.
+
+Stripe integration is covered by `backend/tests/test_stripe_integration.py`,
+which simulates the Stripe API with `httpx.MockTransport` (no network): the
+test-mode subscription flow, `invoice.paid` → `active`, and
+`invoice.payment_failed` → `past_due`.
+
+### Webhook handling — renewal, failure & idempotency
+
+Every provider webhook is **signature-verified** per gateway before anything
+else (bad signature / malformed body → `400`, unknown provider → `404`,
+unconfigured provider → `503`). Verified events are reconciled via
+`SubscriptionService.handle_webhook`:
+
+- **Renewal success** (`invoice.paid` / `payment.succeeded` /
+  `PAYMENT.SALE.COMPLETED`) → status `active`, period dates applied, checkout
+  url cleared.
+- **Renewal failure** (`invoice.payment_failed` / `payment.failed` /
+  `PAYMENT.SALE.DENIED`) → status `past_due` (the grace period) and a
+  notification task is enqueued — **exactly once**, on the transition into
+  `past_due`. With SMTP configured the worker emails the subscriber; otherwise
+  it logs the notification (see `tasks.notify_payment_failed`).
+- **Idempotent processing** — each processed `(provider, event_id)` is recorded
+  in the `processed_webhook_event` ledger **in the same transaction** as the
+  reconciliation. A provider redelivery of the same event id is acknowledged
+  with `"duplicate": true` and re-applies nothing (no duplicate renewal, no
+  double notification). Unverified events can never pollute the ledger.
+
+Gateway refs are unique per provider (`uq_subscription_provider_ref`), so
+reconciliation by `external_ref` is unambiguous. Webhook behavior is covered
+by `backend/tests/test_webhook_renewal.py` with mocked payloads for mock /
+Stripe (signed) / PayPal (mocked verification endpoint) gateways.
 
 ## Background jobs & caching (Celery + Redis)
 

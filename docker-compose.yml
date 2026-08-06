@@ -81,6 +81,31 @@ services:
     networks:
       - cc_net
 
+  # Celery beat: schedules periodic tasks (e.g. expiring non-renewing
+  # subscriptions) onto the worker.
+  beat:
+    build: ./backend
+    container_name: cc-beat
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      WATERMARK_CACHE_REDIS_URL: ${WATERMARK_CACHE_REDIS_URL:-redis://redis:6379/2}
+      WATERMARK_CACHE_TTL_SECONDS: ${WATERMARK_CACHE_TTL_SECONDS:-3600}
+      SECRET_KEY: ${SECRET_KEY}
+    command: celery -A app.celery_app.celery_app beat --loglevel=info
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - cc_net
+
   ui:
     build: ./frontend
     container_name: cc-ui

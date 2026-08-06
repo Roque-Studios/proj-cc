@@ -7,7 +7,7 @@ from .database import get_db
 from .logger import setup_logging
 from sqlalchemy.orm import Session
 from . import cache
-from .routers import auth, creator
+from .routers import auth, creator, subscriptions, viewer, webhooks
 
 setup_logging()
 logger = structlog.get_logger()
@@ -20,6 +20,9 @@ app = FastAPI(
 
 app.include_router(auth.router)
 app.include_router(creator.router)
+app.include_router(viewer.router)
+app.include_router(webhooks.router)
+app.include_router(subscriptions.router)
 
 
 @app.middleware("http")
