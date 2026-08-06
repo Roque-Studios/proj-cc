@@ -340,6 +340,177 @@ for the one-time charge. Stripe's `charge.refunded` normalization is covered
 in `backend/tests/test_stripe_integration.py` and PayPal's
 `PAYMENT.CAPTURE.REFUNDED` in `backend/tests/test_webhook_renewal.py`.
 
+### Creator content dashboard
+
+`GET /api/creator/content` (creator-only) lists the creator's own
+posts/broadcasts, newest first, with the engagement stats the dashboard
+shows: `view_count` (media views served to **non-owners** — each GET counts,
+including watermark-cache hits; HEAD probes, the owner's own previews and
+unauthorized requests never do) and `unlock_count` (active one-time unlocks
+of a paid broadcast; **refunded unlocks are excluded**). Media urls are always
+included (the owner can fetch their own media), plus `media_count`,
+`broadcast_price_cents` and `is_visible`.
+
+- `PATCH /api/creator/content/{id}` — edit the caption (`null`/whitespace
+  clears it) and/or flip `is_visible`; only the provided fields are applied.
+- `DELETE /api/creator/content/{id}` — permanently deletes the post, its
+  media rows, unlock rows and the private originals from storage (unlock rows
+  are deleted explicitly, not just by the Postgres FK cascade, so the delete
+  is correct on any backend).
+
+Every route is **creator-only** (`403` for registered users, `401` anonymous)
+and scoped to the caller: another creator's post is `404` — the same as a
+missing post — so post ids can't be probed across creators.
+
+**Visibility (soft-archive)** — a post with `is_visible=false` (default
+`true`) stays fully editable in the dashboard but disappears from the
+follower feed, and media/unlock requests `404` for everyone but its creator
+(anonymous probes get the same `404` as a nonexistent post — a hidden post is
+indistinguishable from a missing one). The creator's own media previews keep
+working.
+
+**Frontend** — the admin panel at `/settings.html` is now tabbed: **Settings**
+(gateways + messaging) and a mobile-first **Content** tab (built from the
+`roque-*` components — cards, badges, switches, textarea, dialog, toast): a
+stats bar (posts / views / unlocks), stacked post cards with watermarked
+thumbnails (fetched with the access token via `?token=`, the `<img>`
+mechanism), paid-broadcast + hidden badges, an edit dialog (caption +
+visibility), a delete confirmation, and an immediate-save visibility switch
+that reverts on error. Covered by `backend/tests/test_creator_content.py`
+(role gates, listing + stats, unlock counts incl. refunds, view counting,
+caption edits, visibility gating across feed/media/unlock, and delete
+cleaning rows + storage).
+
+### Subscriber management + revenue
+
+`GET /api/creator/subscribers` (creator-only) lists the **owning creator's**
+subscriptions, newest first, paginated (`page`, `page_size`, `total`,
+`has_more`) and filterable by `?status=` (`active`, `trialing`, `incomplete`,
+`past_due`, `canceled`, `expired`). Each row carries the subscriber's identity
+and username, the status, subscription start date (`started_at`) and current
+billing period, `cancel_at_period_end`, and the gateway provider. A different
+creator (or a registered/anonymous user) gets `401`/`403`/`404` — revenue and
+subscriber data are strictly the owning creator's.
+
+The response also carries a global **revenue summary**: `monthly_revenue_cents`
+(subscription payments), `one_time_revenue_cents` (broadcast unlocks) and
+`total_revenue_cents`, plus subscriber counts per status. Revenue is summed
+from the new **payment ledger** (`payment` table): every completed monthly
+charge (each provider's payment-succeeded event / mock activation) and every
+one-time unlock records one row **atomically with the transaction that
+recorded the charge**; a refunded unlock marks its row `refunded` so it drops
+out of the totals. The summary therefore always equals the sum of completed
+payments in the DB by construction. `post_id` on the ledger deliberately has
+no FK — revenue history survives a post being deleted.
+
+Revenue-accuracy detail: only **recurring** charge events (flagged
+`recurring` on the normalized event) may use the subscription email-fallback
+reconciliation, so a gateway's one-time purchase webhook (e.g. a Wompi
+`TransaccionCompra` event with a payer email but no subscription ref) can
+never be reconciled against a subscription — no spurious monthly payment is
+ever recorded for a one-time unlock.
+
+**Frontend** — the admin panel at `/settings.html` gained a mobile-first
+**Subscribers** tab (roque-* components): revenue summary cards (monthly /
+one-time / total), status filter chips, paginated subscriber cards with status
+badges, cancel-at-period-end indicator and `roque-pagination`. Covered by
+`backend/tests/test_creator_subscribers.py` (role gates, own-only list,
+pagination, status filtering, revenue == DB sum exercised end-to-end via real
+subscription and unlock/refund flows) and the Wompi one-time-event regression
+in `backend/tests/test_wompi_integration.py`.
+
+### Public creator landing page
+
+`GET /api/creators/{creator_id}/landing` (public, no auth needed) powers the
+creator's public landing page at `/creator/{id}` (nginx serves `landing.html`
+there). It returns the creator's **public** identity — display name, bio,
+avatar — plus their social accounts and the payment gateways enabled for
+checkout, together with the **requesting viewer's** access level:
+
+- **anonymous** → the page shows the subscribe prompt only (a login link,
+  since subscribing requires an account);
+- **registered (non-follower)** → the same prompt plus account context (who
+  is logged in) and a subscribe button that opens the hosted checkout (the
+  existing `POST /subscribe` flow, resolving strictly from the creator's
+  enabled gateways);
+- **follower** → the profile plus the **full feed** (`GET
+  /creators/{id}/posts` already returns full posts for followers, teasers for
+  everyone else, and excludes hidden posts); paid broadcasts show their price
+  and a locked badge until unlocked.
+
+Classification is the shared viewer access resolver, so an expired
+subscription reverts to the registered view. The landing endpoint itself
+never leaks subscriber data — only public profile fields and enabled gateways.
+
+**Social accounts** — `CreatorProfile.social_links` (JSON dict of
+`twitter` / `instagram` / `tiktok` / `other` handles or urls) is editable by
+the creator via `PUT /creator/profile` (unknown platforms rejected, empty
+values remove a link) and shown as link chips on the landing page. The
+frontend only ever navigates to `http(s)` urls from stored values, so a
+stored link can't be an XSS vector.
+
+The page is built mobile-first from the `roque-*` components (avatar, card,
+badge, button, icon) and is a Vite multi-page entry alongside `index.html` /
+`settings.html`. Covered by `backend/tests/test_landing.py` (anonymous /
+registered / follower / expired states, 404s, social-links roundtrip +
+validation + exposure) and the role-by-role feed tests in
+`backend/tests/test_feed.py`.
+
+### Subscriber feed view (frontend)
+
+The mobile-first subscriber feed (`feed.html`, nginx `/feed/…`, built from the
+`roque-*` components) consumes the follower-gated feed endpoint with
+**infinite scroll** — an IntersectionObserver sentinel loads the next page as
+it enters the viewport (page-key + post-id dedupe so a page can never
+double-load, and a short retry backoff so a transient failure doesn't hammer
+the API). Each post renders by its access state:
+
+- **locked paid broadcast** — a styled lock preview with the one-time price
+  and an **Unlock CTA**: `POST /content/{id}/unlock` (double-click guarded,
+  errors toasted) then swaps the fresh post object in place, so the full
+  broadcast — including every media file — renders immediately;
+- **unlocked / regular post** — the full **watermarked media**, each `<img>`
+  fetched through the secure content endpoint with the access token as
+  `?token=` (the `<img>` authentication mechanism).
+
+The reusable component is `roque-subscriber-feed`
+(`src/components/feed/subscriber-feed.ts`); the `roque-subscriber-feed-page`
+wrapper resolves the creator id from the URL and shows the login/subscribe
+prompts for anonymous / registered non-followers (the endpoint's teaser data
+only — urls withheld). The creator landing page's follower view reuses the
+same component instead of its old inline simplified feed. Backend coverage of
+the lock → unlock → full-access flow (incl. refunds re-locking) is in
+`backend/tests/test_broadcast.py`; the feed role-by-role tests are in
+`backend/tests/test_feed.py`.
+
+### Subscribe / checkout UI
+
+The subscribe checkout (`checkout.html`, nginx `/checkout/…`, `roque-*`
+components) is the payment entry point for visitors. `GET /api/creators/{id}/gateways`
+returns **only the creator's enabled + configured** gateways, and the checkout
+shows exactly that list as a picker; choosing one calls `POST /api/subscribe`
+with the provider, which re-validates strictly against the creator's config.
+The page shows the real monthly tier price and handles every state:
+
+- **already a follower** — a success panel (no payment form);
+- **pending payment** — an incomplete row is surfaced with its hosted
+  checkout url (resume) plus a retry form;
+- **no gateways enabled** — a clear "subscriptions unavailable" state;
+- **payment started** — the user is redirected to the hosted checkout;
+  on return, the page polls `GET /api/subscribe/status` (every 2 s, up to
+  ~30 s) to reconcile the final state: the webhook-driven transition to
+  `active`/`trialing` shows success, while `canceled`/`expired`/a
+  still-`incomplete` row shows a clear payment-not-completed state.
+
+`GET /api/subscribe/status` (authenticated) returns the viewer's subscription
+row for a creator in any status — `incomplete` with its `checkout_url`,
+`active`, `trialing`, `past_due`, `canceled` — plus their access level and the
+tier price, which is what makes the return-reconciliation possible.
+
+The landing page and subscriber-feed page route their Subscribe CTAs here.
+Covered by `backend/tests/test_subscribe_status.py` and the existing
+`test_subscribe.py` / `test_gateway_subscribe.py` suites.
+
 ### Stripe subscriptions
 
 `POST /api/webhooks/stripe` receives signed Stripe events (set it as your
@@ -493,9 +664,18 @@ through these dedicated endpoints, not `GET/PUT /api/creator/profile`.
 **Endpoints** — `POST /messages` (`{recipient_id, body}`, `201`; blocked with
 a `403` as above; unknown recipient `404`); `GET /conversations` (the
 requester's threads, newest first, with the other party + a last-message
-preview); `GET /conversations/{id}/messages` (history, oldest first —
-participants only; an outsider gets the same `404` as a missing thread, so
-conversation ids don't leak).
+preview); `GET /conversations/{id}/messages?limit=50&before_id={id}` —
+**paginated** history, newest-first pages with an id cursor (`before_id` +
+`has_more`), so a chat client loads the latest page and scrolls back
+through older ones; participants only, an outsider gets the same `404` as a
+missing thread, so conversation ids don't leak.
+
+`GET /messages/status?recipient_id={id}` (authenticated) powers the chat UI's
+**composer gate**: it returns whether the caller may message the recipient
+(`can_message`) with a human `reason` when not — e.g. "This creator has
+messaging turned off…" — plus context (recipient is creator?, active
+follower?, existing thread?) so the UI can explain *why* instead of showing a
+dead input box.
 
 Covered by `backend/tests/test_messages.py` (the gate: setting off + no
 thread → blocked with the clear error; setting on → new thread; existing
@@ -539,9 +719,9 @@ recipient's other sockets or the REST send that awaits the push.
 Resilience mirrors the cache layer: Redis is **best-effort** — a publish or
 relay failure is caught, logged once (throttled during sustained outages),
 and degrades to local-only delivery; **disconnected recipients get the
-message via `GET /conversations/{id}/messages` on reconnect** (the persisted
-REST layer is the polling fallback). Users with no live sockets stop being
-tracked by the relay (no unbounded subscription growth).
+message via the paginated `GET /conversations/{id}/messages` on reconnect**
+(the persisted REST layer is the polling fallback). Users with no live
+sockets stop being tracked by the relay (no unbounded subscription growth).
 
 The reverse proxy is wired for upgrades: nginx forwards the `Upgrade`
 handshake on `/api/*` (dev: the Vite proxy sets `ws: true`). Covered by
@@ -551,6 +731,34 @@ WS (follower + policy block, nothing persisted), ping/pong, cross-manager
 relay delivery (the multi-worker case), same-process no-double-delivery,
 Redis-outage degradation, and relay tracking pruned on disconnect — plus the
 in-memory pub/sub stand-in `backend/tests/fake_realtime.py`.
+
+### DM / chat UI (mobile-first)
+
+The chat page (`chat.html`, nginx `/chat/…`, `roque-*` components, mobile
+first) is the message client for creators and subscribers:
+
+- **Inbox** — `GET /conversations` renders the requester's threads with the
+  other party (avatar) and a last-message preview, most recent first;
+  `chat.html?conversation={id}` deep-links straight into a thread.
+- **Thread + pagination** — opening a thread loads the **latest page** of
+  history (`GET /conversations/{id}/messages?limit=50`) and opens the
+  WebSocket; scrolling to the top fetches older pages via the `before_id`
+  cursor with the scroll anchor preserved (newer messages stay put).
+- **Real-time** — sends go through the open socket (`send` frame) with an
+  optimistic bubble that the persisted `ack` replaces (id-deduped, so a
+  local push and the relay can never double-render); if the socket isn't
+  open yet, sends fall back to `POST /messages` (which still pushes live to
+  the recipient). A 3 s auto-reconnect with a 30 s `ping` keepalive keeps the
+  live channel up; a rejected send drops its phantom bubble and toasts the
+  backend's `error` detail.
+- **Disabled-messaging state** — the composer is gated by
+  `GET /messages/status`: when `can_message` is false the input is replaced
+  by a panel explaining the policy (`reason`), e.g. a creator who turned
+  messaging off with no existing thread.
+
+The reusable component is `roque-dm-chat` (`src/pages/chat.ts`). Backend
+coverage for the pagination (`test_messages.py`) and the WS contract
+(`test_realtime.py`) is listed above.
 
 ### Webhook handling — renewal, failure & idempotency
 

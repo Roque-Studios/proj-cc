@@ -103,7 +103,7 @@ export class AeroButton extends LitElement {
 
   render() {
     return html`
-      <button class="aero-btn" @click="${this._handleClick}">
+      <button class="aero-btn" part="aero-btn" @click="${this._handleClick}">
         <slot></slot>
       </button>
     `;

@@ -196,7 +196,7 @@ def test_disconnected_recipient_fetches_on_reconnect(client, db_session):
         assert sws.receive_json()["type"] == "pong"
     history = client.get(f"/conversations/{conv_id}/messages", headers=sub_headers)
     assert history.status_code == 200
-    assert [m["body"] for m in history.json()] == ["offline msg"]
+    assert [m["body"] for m in history.json()["messages"]] == ["offline msg"]
 
 
 # --------------------------------------------------------------------------- #

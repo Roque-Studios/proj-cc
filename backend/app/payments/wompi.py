@@ -184,6 +184,16 @@ class WompiPaymentProvider(PaymentProvider):
             raise WebhookVerificationError(f"Unhandled Wompi transaction estado: {estado}")
         event_type, subscription_status = mapped
 
+        # A recurring-link charge event is identifiable by the subscription /
+        # merchant ref (``idSuscripcion`` / ``identificadorEnlaceComercio``); a
+        # plain one-time ``TransaccionCompra`` event carries only the
+        # transaction id. Marking the distinction lets the service gate its
+        # email fallback, so a one-time purchase event can never be reconciled
+        # against a subscription (and never records a spurious monthly payment).
+        recurring = bool(
+            tx.get("idSuscripcion") or tx.get("identificadorEnlaceComercio")
+        )
+
         return WebhookEvent(
             provider=self.name,
             event_type=event_type,
@@ -198,6 +208,7 @@ class WompiPaymentProvider(PaymentProvider):
             id=event.get("id") or tx.get("idTransaccion"),
             subscription_status=subscription_status,
             customer_email=tx.get("emailCliente"),
+            recurring=recurring,
             metadata={
                 "idTransaccion": tx.get("idTransaccion"),
                 "estado": estado,

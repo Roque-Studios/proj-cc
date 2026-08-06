@@ -340,6 +340,46 @@ def test_wompi_webhook_activates_subscription_by_email(db_session):
         assert len(markers) == 1
 
 
+def test_wompi_one_time_charge_event_never_reconciles_as_monthly(db_session):
+    """A one-time purchase event (email, no subscription ref) is ignored.
+
+    ``TransaccionCompra`` events carry the payer email but no
+    ``idSuscripcion``: without the ``recurring`` gate the email fallback would
+    reconcile the one-time unlock against the subscriber's active subscription
+    and record a spurious *monthly* payment in the revenue ledger. The event
+    must be a no-op instead — the subscription stays untouched and no
+    ``Payment`` row is written.
+    """
+    from app.models import Payment
+
+    fake_api = FakeWompiAPI()
+    provider = _wompi_provider(fake_api)
+
+    with db_session as db:
+        subscription, email, link_id = _subscribe(db, provider)
+        service = SubscriptionService(db, provider=provider)
+        first = _wompi_transaction_event(
+            estado="APROBADA", email=email, id_transaccion="SV-1", id_suscripcion="SUS-1"
+        )
+        service.handle_webhook(first, _signed_headers(first))
+        db.refresh(subscription)
+        assert subscription.status == SubscriptionStatus.active
+        # The recurring activation legitimately records the first month.
+        assert len(db.scalars(select(Payment)).all()) == 1
+
+        # One-time unlock charge webhook: same payer email, no subscription ref.
+        one_time = _wompi_transaction_event(
+            estado="APROBADA", email=email, id_transaccion="SV-100"
+        )
+        event = service.handle_webhook(one_time, _signed_headers(one_time))
+        db.refresh(subscription)
+        assert subscription.status == SubscriptionStatus.active
+        assert subscription.external_ref == link_id
+
+        # Still exactly one payment: the one-time event added nothing.
+        assert len(db.scalars(select(Payment)).all()) == 1
+
+
 def test_wompi_renewal_reconciles_by_email_fallback(db_session):
     """A later renewal (new transaction, same subscriber) stays active.
 

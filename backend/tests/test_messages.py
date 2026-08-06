@@ -499,14 +499,200 @@ def test_conversation_messages_history_participants_only(client, db_session):
     )
     assert client.get("/conversations/999999/messages", headers=sub_headers).status_code == 404
 
-    # Participant sees the history, oldest first.
+    # Participant sees the history, oldest first (paginated response shape).
     history = client.get(f"/conversations/{conv_id}/messages", headers=sub_headers)
     assert history.status_code == 200
-    bodies = [m["body"] for m in history.json()]
-    assert bodies == ["first", "second"]
+    page = history.json()
+    assert [m["body"] for m in page["messages"]] == ["first", "second"]
+    assert page["before_id"] is not None
+    assert page["has_more"] is False
 
     # The creator sees the same thread.
     creator_history = client.get(
         f"/conversations/{conv_id}/messages", headers=creator_headers
     )
     assert creator_history.status_code == 200
+
+
+# --------------------------------------------------------------------------- #
+# Message history pagination (scroll-up cursor)
+# --------------------------------------------------------------------------- #
+
+
+def _fill_conversation(client, headers, recipient_id: int, n: int) -> int:
+    """Send ``n`` messages; returns the conversation id."""
+    conv_id = None
+    for i in range(n):
+        resp = client.post(
+            "/messages",
+            json={"recipient_id": recipient_id, "body": f"msg-{i}"},
+            headers=headers,
+        )
+        assert resp.status_code == 201
+        conv_id = resp.json()["conversation_id"]
+    return conv_id
+
+
+def test_messages_pagination_newest_page_then_older(client, db_session):
+    sub_headers = _register(client, "sub@example.com")
+    with db_session as db:
+        creator_headers = _api_creator(
+            client, db, "creator@example.com", allow_messages=True
+        )
+        creator = db.scalar(select(User).where(User.email == "creator@example.com"))
+        creator_id = creator.id
+        subscriber = db.scalar(select(User).where(User.email == "sub@example.com"))
+        _make_follower(db, subscriber.id, creator_id)
+
+    conv_id = _fill_conversation(client, sub_headers, creator_id, 5)
+
+    # First page: the NEWEST ``limit`` messages, oldest-first within the page.
+    first = client.get(
+        f"/conversations/{conv_id}/messages?limit=2", headers=sub_headers
+    ).json()
+    assert [m["body"] for m in first["messages"]] == ["msg-3", "msg-4"]
+    assert first["has_more"] is True
+
+    # Scroll up: the two before the cursor.
+    second = client.get(
+        f"/conversations/{conv_id}/messages?limit=2&before_id={first['before_id']}",
+        headers=sub_headers,
+    ).json()
+    assert [m["body"] for m in second["messages"]] == ["msg-1", "msg-2"]
+    assert second["has_more"] is True
+
+    # Oldest page: one message, no more history.
+    third = client.get(
+        f"/conversations/{conv_id}/messages?limit=2&before_id={second['before_id']}",
+        headers=sub_headers,
+    ).json()
+    assert [m["body"] for m in third["messages"]] == ["msg-0"]
+    assert third["has_more"] is False
+
+
+def test_messages_pagination_validates_parameters(client, db_session):
+    sub_headers = _register(client, "sub@example.com")
+    with db_session as db:
+        creator_headers = _api_creator(
+            client, db, "creator@example.com", allow_messages=True
+        )
+        creator = db.scalar(select(User).where(User.email == "creator@example.com"))
+        creator_id = creator.id
+        subscriber = db.scalar(select(User).where(User.email == "sub@example.com"))
+        _make_follower(db, subscriber.id, creator_id)
+    conv_id = _fill_conversation(client, sub_headers, creator_id, 2)
+
+    assert (
+        client.get(
+            f"/conversations/{conv_id}/messages?limit=0", headers=sub_headers
+        ).status_code
+        == 422
+    )
+    assert (
+        client.get(
+            f"/conversations/{conv_id}/messages?limit=500", headers=sub_headers
+        ).status_code
+        == 422
+    )
+    assert (
+        client.get(
+            f"/conversations/{conv_id}/messages?before_id=0", headers=sub_headers
+        ).status_code
+        == 422
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Messaging status (chat input gate)
+# --------------------------------------------------------------------------- #
+
+
+def test_messages_status_requires_auth(client, db_session):
+    assert client.get("/messages/status?recipient_id=1").status_code == 401
+
+
+def test_messages_status_unknown_recipient_404(client, db_session):
+    headers = _register(client, "sender@example.com")
+    assert (
+        client.get("/messages/status?recipient_id=999999", headers=headers).status_code
+        == 404
+    )
+
+
+def test_messages_status_subscriber_to_creator(client, db_session):
+    """Follower + policy on -> can message; non-follower -> blocked with reason."""
+    headers = _register(client, "sub@example.com")
+    with db_session as db:
+        creator = _make_creator(db, "creator@example.com", allow_messages=True)
+        creator_id = creator.id
+        subscriber = db.scalar(select(User).where(User.email == "sub@example.com"))
+
+    # Not a follower yet.
+    resp = client.get(f"/messages/status?recipient_id={creator_id}", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["recipient_is_creator"] is True
+    assert body["is_follower"] is False
+    assert body["can_message"] is False
+    assert "follower" in body["reason"].lower()
+
+    # Become a follower -> allowed.
+    with db_session as db:
+        _make_follower(db, subscriber.id, creator_id)
+    resp = client.get(f"/messages/status?recipient_id={creator_id}", headers=headers)
+    assert resp.json()["can_message"] is True
+
+
+def test_messages_status_policy_off_explains_disabled(client, db_session):
+    """The disabled-messaging state the chat UI renders instead of a composer."""
+    headers = _register(client, "sub@example.com")
+    with db_session as db:
+        creator = _make_creator(db, "creator@example.com", allow_messages=False)
+        creator_id = creator.id
+        subscriber = db.scalar(select(User).where(User.email == "sub@example.com"))
+        _make_follower(db, subscriber.id, creator_id)
+        subscriber_id = subscriber.id
+
+    resp = client.get(f"/messages/status?recipient_id={creator_id}", headers=headers)
+    body = resp.json()
+    assert body["messaging_enabled"] is False
+    assert body["can_message"] is False
+    assert "messaging turned off" in body["reason"].lower()
+
+    # With an existing thread the carve-out applies.
+    with db_session as db:
+        db.add(
+            Conversation(
+                creator_id=creator_id,
+                subscriber_id=subscriber_id,
+            )
+        )
+        db.commit()
+    resp = client.get(f"/messages/status?recipient_id={creator_id}", headers=headers)
+    assert resp.json()["can_message"] is True
+
+
+def test_messages_status_creator_can_message_subscriber(client, db_session):
+    with db_session as db:
+        creator_headers = _api_creator(client, db, "creator@example.com")
+        subscriber = _make_subscriber(db, "sub@example.com")
+        sub_id = subscriber.id
+
+    resp = client.get(f"/messages/status?recipient_id={sub_id}", headers=creator_headers)
+    body = resp.json()
+    assert body["recipient_is_creator"] is False
+    assert body["can_message"] is True
+
+
+def test_messages_status_self_and_creator_to_creator(client, db_session):
+    with db_session as db:
+        creator_a_headers = _api_creator(client, db, "a@example.com")
+        _api_creator(client, db, "b@example.com")
+        b_id = db.scalar(select(User).where(User.email == "b@example.com")).id
+        a_id = db.scalar(select(User).where(User.email == "a@example.com")).id
+
+    resp = client.get(f"/messages/status?recipient_id={b_id}", headers=creator_a_headers)
+    assert resp.json()["can_message"] is False
+
+    resp = client.get(f"/messages/status?recipient_id={a_id}", headers=creator_a_headers)
+    assert resp.json()["can_message"] is False

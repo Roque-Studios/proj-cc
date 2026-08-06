@@ -6,7 +6,21 @@ from sqlalchemy import text
 from .database import get_db
 from .logger import setup_logging
 from sqlalchemy.orm import Session
-from .routers import admin, auth, content, creator, messages, posts, realtime, subscriptions, viewer, webhooks
+from .routers import (
+    admin,
+    auth,
+    content,
+    creator,
+    creator_content,
+    creator_subscribers,
+    messages,
+    posts,
+    public,
+    realtime,
+    subscriptions,
+    viewer,
+    webhooks,
+)
 
 setup_logging()
 logger = structlog.get_logger()
@@ -19,10 +33,13 @@ app = FastAPI(
 
 app.include_router(auth.router)
 app.include_router(creator.router)
+app.include_router(creator_content.router)
+app.include_router(creator_subscribers.router)
 app.include_router(viewer.router)
 app.include_router(webhooks.router)
 app.include_router(subscriptions.router)
 app.include_router(posts.router)
+app.include_router(public.router)
 app.include_router(content.router)
 app.include_router(admin.router)
 app.include_router(messages.router)

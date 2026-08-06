@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.17.0] - 2026-08-06
+### Added
+- DM / chat UI (mobile-first): `chat.html` + `roque-dm-chat` at `/chat` (nginx `/chat/…` + Vite multi-page input) — inbox from `GET /conversations` (other party + last-message preview), thread view with **paginated** history (`GET /conversations/{id}/messages?limit=&before_id=` — latest page first, scroll-to-top loads older pages via the id cursor with the scroll anchor preserved), and real-time delivery over `WS /api/ws/dms?token=…`
+- Message history is now **paginated** (`MessagesPageOut`: `messages` / `before_id` / `has_more`) instead of the unbounded list — `GET /conversations/{id}/messages` takes `limit` (default 50) + `before_id`
+- `GET /messages/status?recipient_id={id}` (auth) — the composer gate: `can_message` + a human `reason` when messaging is blocked (e.g. creator turned DMs off with no existing thread), plus context (recipient is creator?, active follower?, existing thread?) — the chat UI shows a disabled-messaging panel instead of the input box when blocked
+- Chat UX: optimistic sends with ack replacement (id-deduped — a local push + relay can never double-render, and a failed send drops its phantom bubble + toasts the backend's error detail), 3 s auto-reconnect with 30 s `ping` keepalive, REST fallback when the socket isn't open, `chat.html?conversation={id}` deep links, and a mobile one-pane layout (inbox ↔ thread via a host class)
+- Coverage: `backend/tests/test_messages.py` (pagination: newest-first pages, `before_id` cursor, `has_more`, page boundaries) + `test_messages_status` (the gate endpoint: can_message states + reasons) + updated `test_realtime.py` for the paginated history shape
+
+## [0.16.0] - 2026-08-06
+### Added
+- Subscribe / checkout UI: `roque-subscribe-checkout` component + `checkout.html` at `/checkout?creator_id={id}` (nginx + Vite multi-page) — shows **only the creator's enabled** gateways (from the checkout-list endpoint, the same set `POST /subscribe` validates against), a gateway picker, the real tier price (`tier_price_cents` from the status endpoint), and a subscribe action that redirects to the hosted checkout
+- `GET /subscribe/status` (auth): the viewer's subscription row for a creator in **any** status (incl. `incomplete` with its `checkout_url`) + access level + tier price — the return-reconcile mechanism
+- **Return reconciliation**: a pending-checkout marker is stored locally before redirect; on return the page polls `/subscribe/status` every 2 s (up to ~30 s) for the webhook-driven transition — `active`/`trialing` shows a success state, `canceled`/`expired`/still-`incomplete` shows a clear payment-not-completed state with a resume-checkout action; stale markers are cleared on load
+- States handled: already a follower (success panel), pending payment (resume + retry form), no enabled gateways (clear error), anonymous (redirected to login), failure (toast + error box)
+- Landing and subscriber-feed pages now route their Subscribe CTAs to the checkout page (instead of a direct subscribe call)
+- Coverage: `backend/tests/test_subscribe_status.py` (6 tests: auth gate, 404, no-subscription, incomplete-with-checkout-url, active follower, past-due→canceled row mutation)
+
+## [0.15.0] - 2026-08-06
+### Added
+- Subscriber feed view: reusable `roque-subscriber-feed` component (`src/components/feed/`) consuming the paginated feed endpoint with **infinite scroll** (IntersectionObserver sentinel, page-key + post-id dedupe so pages can never double-load, and a 3 s retry backoff so a failed page load can't hammer the API)
+- Locked-state rendering: paid broadcasts show a styled lock preview with the one-time price and an **Unlock CTA** that calls `POST /content/{id}/unlock` (double-click guarded, errors toasted) and swaps in the fresh post object wholesale so multi-media broadcasts render fully; unlocked content renders the full **watermarked media via the secure endpoint** (`?token=` for `<img>` tags)
+- `feed.html` + `roque-subscriber-feed-page` wrapper at `/feed?creator_id={id}` (or `/feed/{id}`; nginx + Vite multi-page input): creator header, and non-follower states — anonymous → login prompt, registered → subscribe prompt
+- The landing page's follower view now delegates to `roque-subscriber-feed` (infinite scroll + unlock CTA instead of the old inline simplified feed)
+- `api.getCreatorFeed(creatorId, page, pageSize)` (paginated) + `api.unlockBroadcast(postId)`
+
+## [0.14.0] - 2026-08-06
+### Added
+- Public creator landing page: `GET /creators/{id}/landing` (public, no auth) returns the creator's public profile (display name, bio, avatar), their social accounts, the **requesting viewer's** access level (anonymous / registered / follower — via the shared access resolver, so expired subscriptions revert to registered), and the creator's enabled checkout gateways
+- `CreatorProfile.social_links` (JSON: twitter/instagram/tiktok/other handles or urls) + migration `5e6f7a8b9c0d`; editable via `PUT /creator/profile` (unknown platforms rejected; empty values remove a link) and shown on the landing page to every visitor
+- Frontend: `landing.html` + `roque-creator-landing` (roque-* only, mobile-first) at `/creator/{id}` (nginx maps the path; Vite multi-page input): profile header with avatar/bio, social link chips (new `x`/`link`/`lock` icons), and role-based content — anonymous sees a login-to-subscribe prompt, registered non-followers see account context + subscribe button (opens the hosted checkout for the creator's enabled gateways), followers get the full feed with watermarked thumbnails and locked/price badges on paid broadcasts
+- Settings panel: a "Public profile & social links" card to edit the landing page's social accounts
+- Coverage: `backend/tests/test_landing.py` (7 tests: anonymous/registered/follower/expired landing states, 404s, social-links roundtrip + unknown-platform rejection + only-configured-accounts exposure)
+
+## [0.13.0] - 2026-08-06
+### Added
+- Payment ledger: `Payment` model + migration `4c5d6e7f8a9b` (kind `subscription`/`unlock`, amount_cents, status `completed`/`refunded`, `post_id` deliberately FK-less so revenue survives post deletion) — recorded atomically with each completed monthly payment (every provider's `payment.succeeded` / mock activation) and each one-time unlock charge; refunded unlocks mark their payment row `refunded`
+- Revenue-accuracy hardening: `WebhookEvent.recurring` flag — the subscription email-fallback is gated on it, so a provider's one-time purchase event (e.g. Wompi `TransaccionCompra` with a payer email but no subscription ref) can never be misreconciled against a subscription and never records a spurious monthly payment
+- `GET /creator/subscribers` (creator-only): paginated + `?status=`-filtered subscriber list (identity, start date, period, cancel-at-period-end, provider) plus a revenue summary (monthly / one-time / total = SUM of completed payments; active/trialing/past_due/canceled counts) — by construction revenue always matches the sum of completed payments in the DB
+- Frontend: the admin panel gained a mobile-first **Subscribers** tab (roque-* components): revenue summary cards, status filter chips, paginated subscriber cards with `roque-pagination`, and status badges
+- Coverage: `backend/tests/test_creator_subscribers.py` (12 tests: role gates, own-only list, pagination, status filter, revenue == DB sum via direct + real subscription + real unlock/refund flows) + a Wompi one-time-event regression test
+
+## [0.12.0] - 2026-08-06
+### Added
+- Creator content dashboard: `GET /creator/content` lists the creator's own posts/broadcasts (newest first) with engagement stats — `view_count` (media views served to non-owners) and `unlock_count` (active one-time unlocks; refunded excluded)
+- `PATCH /creator/content/{id}` — edit caption + visibility; `DELETE /creator/content/{id}` — deletes the post, media rows, unlock rows and the private originals (all creator-only; other creators' posts `404`)
+- Post visibility (soft-archive): `is_visible` (default true) — hidden posts leave the follower feed and media/unlock requests `404` for everyone but the owner (indistinguishable from a missing post to outsiders, incl. anonymous probes); migration `3f4a5b6c7d8e`
+- View tracking: `view_count` incremented atomically on each non-owner GET of a media file (HEAD / owner / unauthorized never count; watermark-cache hits do)
+- Frontend: the admin panel (`settings.html`) gained a tabbed layout — **Settings** (gateways + messaging) and a mobile-first **Content** tab: stats bar (posts/views/unlocks), post cards with watermarked thumbnails (auth-gated via `?token=`), paid-broadcast badges, edit-caption dialog, delete confirmation, and an immediate-save visibility switch with error revert
+- `roque-button` exposed `part="aero-btn"` for page-level destructive styling
+- Coverage: `backend/tests/test_creator_content.py` (12 tests: role gates, own-posts listing + stats, unlock count incl. refund exclusion, real unlock-endpoint count, view counting incl. cache hits, caption edit, visibility toggle feed/media/unlock gating, delete cleaning rows + storage)
+
 ## [0.11.0] - 2026-08-06
 ### Added
 - Real-time DM delivery: `WS /api/ws/dms?token=<access JWT>` streams live messages between creators and followers; sends persist through the **same DM gate** as REST (non-followers/policy blocks get an `error` frame, nothing persisted), `4401` for missing/invalid/revoked tokens

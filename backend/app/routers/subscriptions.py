@@ -11,16 +11,25 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..access import resolve_viewer_context
+from ..config import settings
 from ..database import get_db
 from ..deps import get_current_user
 from ..gateways import is_config_complete
 from ..models import Subscription, SubscriptionStatus, User, UserRole
 from ..payments import PaymentProvider, ProviderConfigurationError
 from ..payments.factory import build_provider_from_config, resolve_plan_id
-from ..schemas import CancelRequest, SubscribeRequest, SubscribeResponse, SubscriptionOut
+from ..schemas import (
+    CancelRequest,
+    SubscribeRequest,
+    SubscribeResponse,
+    SubscribeStatusOut,
+    SubscriptionOut,
+)
 from ..services.gateways import enabled_configured_gateways, get_gateway_row
 from ..services.subscriptions import SubscriptionService
 
@@ -70,6 +79,51 @@ def subscribe(
         subscription=SubscriptionOut.model_validate(subscription),
         checkout_url=subscription.checkout_url,
         status=subscription.status.value,
+    )
+
+
+@router.get("/subscribe/status", response_model=SubscribeStatusOut)
+def subscribe_status(
+    request: Request,
+    creator_id: int = Query(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """The viewer's subscription state for a creator — checkout reconciliation.
+
+    Authenticated only. Returns the viewer's current row for this creator (any
+    status) plus their access level. The checkout UI polls this after the
+    hosted payment redirect to reconcile the final state: a row that went
+    ``active``/``trialing`` means the webhook landed; one still ``incomplete``
+    means the payment didn't complete (or the webhook is still in flight).
+    """
+    creator = db.get(User, creator_id)
+    if creator is None or creator.role != UserRole.creator or not creator.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Creator not found",
+        )
+
+    ctx = resolve_viewer_context(request, creator_id, db)
+    subscription = None
+    if ctx.subscription is not None:
+        subscription = ctx.subscription
+    else:
+        # The resolver only returns active/trialing rows; the checkout also
+        # needs the incomplete/past_due row to show a pending payment.
+        subscription = db.scalar(
+            select(Subscription).where(
+                Subscription.subscriber_id == user.id,
+                Subscription.creator_id == creator_id,
+            )
+        )
+
+    return SubscribeStatusOut(
+        viewer_level=ctx.level.value,
+        subscription=(
+            SubscriptionOut.model_validate(subscription) if subscription is not None else None
+        ),
+        tier_price_cents=settings.SUBSCRIPTION_TIER_PRICE_CENTS,
     )
 
 

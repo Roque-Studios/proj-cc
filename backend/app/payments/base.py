@@ -124,6 +124,12 @@ class WebhookEvent:
     # fallback for gateways whose events don't reference our stored ref
     # directly (e.g. Wompi recurring-link charges).
     customer_email: str | None = None
+    # True when the event concerns a **recurring** (subscription) charge — the
+    # email fallback in the subscription service is gated on this flag so a
+    # provider's one-time purchase events (same email, no subscription ref)
+    # can never be misreconciled against a subscription row (and never record
+    # a spurious monthly payment in the revenue ledger).
+    recurring: bool = False
     metadata: dict = field(default_factory=dict)
     raw: dict = field(default_factory=dict)
 

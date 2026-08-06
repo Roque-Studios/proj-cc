@@ -35,6 +35,9 @@ export class CreatorGatewaySettings extends LitElement {
   @state() private toast = ''
   @state() private toastHeading = ''
   @state() private toastVisible = false
+  // Public profile: social accounts shown on the creator landing page.
+  @state() private socialForm: Record<string, string> = {}
+  @state() private socialBusy = false
 
   static styles = css`
     :host {
@@ -157,11 +160,18 @@ export class CreatorGatewaySettings extends LitElement {
     this.loading = true
     this.error = ''
     try {
-      const [settings, messaging] = await Promise.all([
+      const [settings, messaging, profile] = await Promise.all([
         api.getGatewaySettings(),
         api.getMessagingSettings(),
+        api.getCreatorProfile(),
       ])
       this.messagingOn = messaging.allow_messages_from_all_followers
+      this.socialForm = {
+        twitter: profile.social_links?.twitter ?? '',
+        instagram: profile.social_links?.instagram ?? '',
+        tiktok: profile.social_links?.tiktok ?? '',
+        other: profile.social_links?.other ?? '',
+      }
       this.settings = settings.filter((g) => UI_GATEWAYS.includes(g.gateway))
       this.form = {}
       this.enabled = {}
@@ -301,6 +311,29 @@ export class CreatorGatewaySettings extends LitElement {
     }
   }
 
+  private _onSocialField(platform: string, value: string) {
+    this.socialForm = { ...this.socialForm, [platform]: value }
+  }
+
+  private async _saveSocialLinks() {
+    if (this.socialBusy) return
+    this.socialBusy = true
+    try {
+      const social_links: Record<string, string> = {}
+      for (const [platform, value] of Object.entries(this.socialForm)) {
+        if (value.trim()) social_links[platform] = value.trim()
+      }
+      await api.updateCreatorProfile({ social_links })
+      this.toastHeading = 'Profile saved'
+      this.toast = 'Your social accounts are now shown on your public landing page.'
+      this._showToast()
+    } catch (err) {
+      this._handleError(err)
+    } finally {
+      this.socialBusy = false
+    }
+  }
+
   private _onLogout() {
     const refresh = localStorage.getItem('cc_refresh_token')
     if (refresh) {
@@ -363,6 +396,39 @@ export class CreatorGatewaySettings extends LitElement {
               @aero-dismiss="${() => (this.error = '')}"
             ></roque-alert>`
           : ''}
+
+        <roque-card heading="Public profile & social links">
+          <p class="desc">
+            These accounts are shown on your public landing page
+            (<code>/creator/{id}</code>) for every visitor, before they
+            subscribe. Leave a field empty to hide that platform.
+          </p>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px">
+            ${(['twitter', 'instagram', 'tiktok', 'other'] as const).map(
+              (platform) => html`
+                <roque-text-field
+                  label="${platform === 'other' ? 'Website / other' : platform[0].toUpperCase() + platform.slice(1)}"
+                  placeholder="${platform === 'other' ? 'https://…' : '@handle'}"
+                  .value="${this.socialForm[platform] ?? ''}"
+                  @aero-input="${(e: CustomEvent) =>
+                    this._onSocialField(platform, e.detail?.value ?? '')}"
+                ></roque-text-field>
+              `,
+            )}
+          </div>
+          <div class="footer-row">
+            <span class="summary-label">Shown on the landing page.</span>
+            <roque-button
+              context="submit"
+              buttonId="save-social"
+              ?disabled="${this.socialBusy}"
+              @aero-click="${this._saveSocialLinks}"
+              >${this.socialBusy ? 'Saving…' : 'Save links'}</roque-button
+            >
+          </div>
+        </roque-card>
+
+        <roque-divider orientation="horizontal" spacing="18"></roque-divider>
 
         <roque-card heading="Messaging">
           <p class="desc">

@@ -17,10 +17,15 @@ export default defineConfig({
   build: {
     rollupOptions: {
       // Multi-page: settings.html is the private admin page (only reachable by
-      // typing its URL) and must be emitted alongside index.html.
+      // typing its URL) and landing.html is the public creator landing page;
+      // both must be emitted alongside index.html.
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
         settings: fileURLToPath(new URL('./settings.html', import.meta.url)),
+        landing: fileURLToPath(new URL('./landing.html', import.meta.url)),
+        feed: fileURLToPath(new URL('./feed.html', import.meta.url)),
+        checkout: fileURLToPath(new URL('./checkout.html', import.meta.url)),
+        chat: fileURLToPath(new URL('./chat.html', import.meta.url)),
       },
     },
   },

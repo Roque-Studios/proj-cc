@@ -37,6 +37,7 @@ from fastapi import (
     Response,
     status,
 )
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 from starlette.responses import JSONResponse
 
@@ -77,15 +78,24 @@ def serve_post_media(
         )
 
     ctx = resolve_viewer_context(request, post.creator_id, db)
+    # The post's creator always has access to their own content; everyone else
+    # needs an active (or trialing) subscription with a current period.
+    is_owner = ctx.user is not None and ctx.user.id == post.creator_id
+    # A hidden (soft-archived) post is unreachable by anyone but its creator —
+    # 404 (like a missing post, and before the 401) so anonymous probes can't
+    # distinguish a hidden post from a nonexistent one, matching the unlock
+    # endpoint's 404-before-auth behavior.
+    if not post.is_visible and not is_owner:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Post not found",
+        )
     if ctx.is_anonymous:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    # The post's creator always has access to their own content; everyone else
-    # needs an active (or trialing) subscription with a current period.
-    is_owner = ctx.user is not None and ctx.user.id == post.creator_id
     if not ctx.is_follower and not is_owner:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -121,15 +131,32 @@ def serve_post_media(
             detail="Media file missing",
         )
 
+    # Capture the values before any commit below (commits expire ORM
+    # instances — re-reading them after would add refresh queries on the
+    # media hot path).
+    storage_key = media.storage_key
+    media_type = media.media_type
+
+    # Engagement: count media views served to non-owners (GET only — HEAD
+    # probes and the owner's own previews don't count toward the dashboard).
+    # An atomic UPDATE so concurrent views can't lose increments.
+    if request.method == "GET" and not is_owner:
+        db.execute(
+            update(Post)
+            .where(Post.id == post.id)
+            .values(view_count=Post.view_count + 1)
+        )
+        db.commit()
+
     # The viewer identity is known only after authz, so the watermark (and its
     # per-viewer cache entry) is resolved here — never before. ``post_id`` is
     # embedded in the watermark text so a leaked capture traces back to the
     # post as well as the viewer (see app.watermark_trace).
     user_ref = f"user:{ctx.user.id}"
-    watermarked, cache_status = serve_media(media.storage_key, user_ref, post_id=post.id)
+    watermarked, cache_status = serve_media(storage_key, user_ref, post_id=post.id)
     return Response(
         content=watermarked,
-        media_type=served_content_type(media.media_type),
+        media_type=served_content_type(media_type),
         headers={
             "Cache-Control": "no-store",
             "X-Watermark": user_ref,
@@ -154,6 +181,12 @@ def unlock_broadcast(
     """
     post = db.get(Post, post_id)
     if post is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Post not found",
+        )
+    # Hidden posts can't be unlocked (they don't exist to outsiders).
+    if not post.is_visible:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Post not found",

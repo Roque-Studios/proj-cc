@@ -77,6 +77,7 @@ class CreatorProfileOut(BaseModel):
     display_name: str | None
     bio: str | None
     avatar_url: str | None
+    social_links: dict[str, str] | None
     payout_info: dict | None
     created_at: datetime
     updated_at: datetime
@@ -85,12 +86,34 @@ class CreatorProfileOut(BaseModel):
 
 
 class CreatorProfileUpdate(BaseModel):
-    """Partial profile update — only provided fields are applied."""
+    """Partial profile update — only provided fields are applied.
+
+    ``social_links`` is a dict of platform -> handle/url (``twitter``,
+    ``instagram``, ``tiktok``, ``other``); unknown platforms are rejected.
+    ``None`` clears the whole block; an empty string removes one link.
+    """
 
     display_name: str | None = Field(default=None, min_length=1, max_length=100)
     bio: str | None = Field(default=None, max_length=2000)
     avatar_url: str | None = Field(default=None, max_length=500)
+    social_links: dict[str, str] | None = None
     payout_info: dict | None = None
+
+    @field_validator("social_links")
+    @classmethod
+    def _validate_social_links(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        if value is None:
+            return value
+        allowed = {"twitter", "instagram", "tiktok", "other"}
+        cleaned = {}
+        for platform, link in value.items():
+            platform = platform.strip().lower()
+            if platform not in allowed:
+                raise ValueError(f"Unknown social platform: {platform}")
+            link = (link or "").strip()
+            if link:
+                cleaned[platform] = link[:500]
+        return cleaned
 
 
 class SubscribeRequest(BaseModel):
@@ -130,12 +153,76 @@ class SubscriptionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class SocialLinkOut(BaseModel):
+    """One social account on a creator's public landing page."""
+
+    platform: str  # twitter | instagram | tiktok | other
+    label: str  # human label for the link chip
+    value: str  # handle or url as stored
+
+
+class CreatorLandingOut(BaseModel):
+    """The public creator landing page payload.
+
+    ``profile`` carries the public creator identity (display name, bio,
+    avatar) plus the social accounts; ``viewer`` is the requesting viewer's
+    access level for this creator (anonymous / registered / follower) with
+    account context when authenticated; ``gateways`` are the creator's enabled
+    payment gateways so the subscribe CTA can list them.
+    """
+
+    profile: CreatorLandingProfileOut
+    social_links: list[SocialLinkOut]
+    viewer: ViewerLandingOut
+    gateways: list[CheckoutGatewayOut]
+
+
+class CreatorLandingProfileOut(BaseModel):
+    id: int
+    username: str | None
+    display_name: str | None
+    bio: str | None
+    avatar_url: str | None
+
+
+class ViewerLandingOut(BaseModel):
+    """The requesting viewer's state on this creator's landing page.
+
+    ``level`` is one of ``anonymous`` / ``registered`` / ``follower``. For
+    authenticated viewers ``user_id`` and ``username`` provide the account
+    context the registered view shows; ``subscription`` is the current
+    subscription status when the viewer is a follower.
+    """
+
+    level: str
+    user_id: int | None
+    username: str | None
+    subscription: str | None
+
+
 class SubscribeResponse(BaseModel):
     """Result of starting a subscription: the pending row + hosted checkout url."""
 
     subscription: SubscriptionOut
     checkout_url: str | None
     status: str
+
+
+class SubscribeStatusOut(BaseModel):
+    """The viewer's subscription state for a creator — the checkout reconciler.
+
+    Lets the checkout UI reconcile the final state after the hosted payment:
+    ``subscription`` is the viewer's row for this creator (or ``None``); its
+    ``status`` + ``checkout_url`` tell the UI whether payment is still
+    pending (``incomplete``), succeeded (``active``/``trialing``) or failed
+    (stayed incomplete / went ``past_due``/``canceled``/``expired``).
+    ``viewer_level`` mirrors the access resolver (anonymous/registered/follower).
+    ``tier_price_cents`` is the monthly tier price the checkout form displays.
+    """
+
+    viewer_level: str
+    subscription: SubscriptionOut | None
+    tier_price_cents: int
 
 
 class PostMediaOut(BaseModel):
@@ -246,6 +333,88 @@ class FeedResponse(BaseModel):
     has_more: bool
 
 
+class CreatorPostOut(BaseModel):
+    """One of the creator's own posts as shown on the content dashboard.
+
+    Unlike the viewer-facing ``PostOut`` this always includes media urls (the
+    owner can fetch their own media) plus the engagement stats: ``view_count``
+    (media views served to non-owners) and ``unlock_count`` (active one-time
+    unlocks — refunded unlocks are excluded).
+    """
+
+    id: int
+    caption: str | None
+    broadcast_price_cents: int | None
+    is_visible: bool
+    created_at: datetime
+    updated_at: datetime
+    media_count: int
+    view_count: int
+    unlock_count: int
+    media: list[PostMediaOut]
+
+
+class PostUpdate(BaseModel):
+    """Partial dashboard update of one of the creator's own posts.
+
+    ``caption`` updates the post's caption (``null`` or whitespace-only clears
+    it); ``is_visible`` toggles the post's visibility to followers (a hidden
+    post is soft-archived: excluded from the feed, non-owner media requests
+    ``404``). Only the provided fields are applied.
+    """
+
+    caption: str | None = Field(default=None, max_length=2000)
+    is_visible: bool | None = None
+
+
+class SubscriberOut(BaseModel):
+    """One subscription in the creator's subscriber list.
+
+    ``started_at`` is when the subscription row was created (the start date);
+    the subscriber's email/username come from the owning ``User`` row.
+    """
+
+    subscription_id: int
+    subscriber_id: int
+    subscriber_email: str
+    subscriber_username: str | None
+    status: str
+    current_period_start: datetime | None
+    current_period_end: datetime | None
+    cancel_at_period_end: bool
+    started_at: datetime
+    payment_provider: str | None
+
+
+class RevenueSummaryOut(BaseModel):
+    """The creator's revenue ledger summary.
+
+    ``monthly_revenue_cents`` / ``one_time_revenue_cents`` are the sums of
+    **completed** subscription / unlock payments (refunded rows excluded) —
+    exactly the sum of completed payments in the ``payment`` ledger.
+    """
+
+    monthly_revenue_cents: int
+    one_time_revenue_cents: int
+    total_revenue_cents: int
+    active_subscribers: int
+    trialing_subscribers: int
+    past_due_subscribers: int
+    canceled_subscribers: int
+    total_subscribers: int
+
+
+class SubscriberListOut(BaseModel):
+    """Paginated subscriber list + the creator's global revenue summary."""
+
+    items: list[SubscriberOut]
+    page: int
+    page_size: int
+    total: int
+    has_more: bool
+    summary: RevenueSummaryOut
+
+
 class MessagingSettingsUpdate(BaseModel):
     """Toggle the creator's DM policy: who may start a conversation."""
 
@@ -282,6 +451,39 @@ class MessageOut(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class MessagesPageOut(BaseModel):
+    """A paginated page of a conversation's message history (oldest first).
+
+    ``before_id`` echoes the page cursor; pass it back to fetch the messages
+    **older** than this page. ``has_more`` is true when older messages exist.
+    """
+
+    messages: list[MessageOut]
+    before_id: int | None
+    has_more: bool
+
+
+class MessagesStatusOut(BaseModel):
+    """Whether the current user may message a recipient (the chat input gate).
+
+    The chat UI renders its input box only when ``can_message`` is true;
+    otherwise it shows the ``reason`` explanation (e.g. a creator whose
+    messaging policy is off and the sender has no existing thread). The other
+    fields give the UI context: who the recipient is (creator?), whether the
+    sender is an active follower, and whether a thread already exists.
+    """
+
+    recipient_id: int
+    recipient_username: str | None
+    recipient_is_creator: bool
+    is_follower: bool
+    has_conversation: bool
+    messaging_enabled: bool
+    can_message: bool
+    reason: str
+
 
 
 class UserSummaryOut(BaseModel):

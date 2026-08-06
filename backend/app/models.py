@@ -206,6 +206,13 @@ class Post(Base):
     caption = Column(Text, nullable=True)
     # One-time unlock price in cents; NULL = a regular (free) post.
     broadcast_price_cents = Column(Integer, nullable=True)
+    # Whether the post is shown to followers (feed + media). A hidden post is
+    # soft-archived: only its creator can still view/edit it (dashboard); the
+    # public feed excludes it and non-owner media/unlock requests 404.
+    is_visible = Column(Boolean, default=True, nullable=False, server_default="true")
+    # Engagement: total media views served to non-owner authorized viewers
+    # (each GET of a media file counts; owner views and HEAD requests don't).
+    view_count = Column(Integer, default=0, nullable=False, server_default="0")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -310,6 +317,44 @@ class PaidUnlock(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     post = relationship("Post", back_populates="unlocks")
+
+
+class Payment(Base):
+    """One completed (or refunded) payment in a creator's revenue ledger.
+
+    A row is written **atomically with the transaction that recorded the
+    charge**: a monthly subscription payment (each successful payment event /
+    activation) or a one-time broadcast unlock. The revenue dashboard sums the
+    *completed* rows; a refunded unlock marks its payment row ``refunded`` so
+    it drops out of revenue. ``post_id`` deliberately has **no FK** — revenue
+    history must survive a post being deleted (the money was collected).
+    """
+
+    __tablename__ = "payment"
+
+    id = Column(Integer, primary_key=True, index=True)
+    creator_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    subscriber_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    # "subscription" (monthly tier) | "unlock" (one-time broadcast unlock).
+    kind = Column(String(20), nullable=False)
+    amount_cents = Column(Integer, nullable=False)
+    # "completed" | "refunded" (a refunded unlock's charge is excluded from revenue).
+    status = Column(String(20), default="completed", nullable=False, server_default="completed")
+    payment_provider = Column(String(50), nullable=True)
+    external_ref = Column(String(255), index=True, nullable=True)
+    # For unlocks; intentionally NOT a FK so revenue survives post deletion.
+    post_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class CreatorGatewayConfig(Base):
@@ -467,6 +512,12 @@ class CreatorProfile(Base):
     display_name = Column(String(100), nullable=True)
     bio = Column(Text, nullable=True)
     avatar_url = Column(String(500), nullable=True)
+    # Public social-media account handles/urls shown on the creator's public
+    # landing page: {"twitter": "@handle", "instagram": "@handle",
+    # "tiktok": "@handle", "other": "https://..."}. Keys are the supported
+    # platforms; values are free-form (handles or full urls) — the frontend
+    # renders links from them. ``None``/empty = no link for that platform.
+    social_links = Column(JSON, nullable=True)
     payout_info = Column(JSON, nullable=True)  # placeholder, e.g. {"method": "...", "email": "..."}
     # DM policy: when True, every active follower may start a conversation.
     # When False, followers can only continue an **existing** conversation

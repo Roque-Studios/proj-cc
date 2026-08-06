@@ -25,7 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import PaidUnlock, Post, ProcessedWebhookEvent
+from ..models import PaidUnlock, Payment, Post, ProcessedWebhookEvent
 from ..payments import ChargeRequest, WebhookEvent, get_payment_provider
 
 logger = structlog.get_logger()
@@ -156,6 +156,21 @@ class BroadcastService:
                 external_ref=result.external_ref,
             )
             self.db.add(unlock)
+        # Revenue ledger: every successful one-time charge (first unlock or
+        # re-purchase) records a completed payment, in the same transaction —
+        # the unique-constraint loser's rollback records nothing.
+        self.db.add(
+            Payment(
+                creator_id=post.creator_id,
+                subscriber_id=subscriber_id,
+                kind="unlock",
+                amount_cents=post.broadcast_price_cents,
+                status="completed",
+                payment_provider=self.provider.name,
+                external_ref=result.external_ref,
+                post_id=post.id,
+            )
+        )
         try:
             self.db.commit()
         except IntegrityError:
@@ -208,6 +223,33 @@ class BroadcastService:
             return event
 
         unlock.refunded_at = datetime.now(timezone.utc)
+        # Revenue ledger: mark the matching charge refunded so it drops out of
+        # the revenue totals. Ref first (the exact charge), then the metadata
+        # fallback for providers whose refunds carry a foreign id (PayPal
+        # capture ids) — same accepted edge as the PaidUnlock matching.
+        payment = self.db.scalar(
+            select(Payment).where(
+                Payment.external_ref == event.external_ref,
+                Payment.status == "completed",
+            )
+        )
+        if payment is None:
+            meta = event.metadata
+            try:
+                payment = self.db.scalar(
+                    select(Payment)
+                    .where(
+                        Payment.kind == "unlock",
+                        Payment.subscriber_id == int(meta["subscriber_id"]),
+                        Payment.post_id == int(meta["post_id"]),
+                        Payment.status == "completed",
+                    )
+                    .order_by(Payment.id)
+                )
+            except (KeyError, TypeError, ValueError):
+                payment = None
+        if payment is not None:
+            payment.status = "refunded"
         if event.id is not None:
             self.db.add(
                 ProcessedWebhookEvent(provider=event.provider, event_id=event.id)

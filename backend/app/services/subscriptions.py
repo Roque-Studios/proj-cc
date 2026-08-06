@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import (
+    Payment,
     ProcessedWebhookEvent,
     Subscription,
     SubscriptionStatus,
@@ -272,13 +273,21 @@ class SubscriptionService:
                 if subscription is not None and event.external_ref != session_id:
                     subscription.external_ref = event.external_ref
                     ref_adopted = True
-        if subscription is None and event.customer_email:
+        if (
+            subscription is None
+            and event.customer_email
+            and event.recurring
+        ):
             # Gateways whose recurring-charge events don't reference the ref we
             # stored (e.g. Wompi recurring-link charges carry the suscripcion
             # id, not the link id) match by the payer email instead: the user's
             # latest non-terminal row for this provider. The event ref is NOT
             # adopted — ``external_ref`` stays the gateway resource we created
             # (the Wompi link id) so cancellation still targets the right link.
+            # Gated on ``event.recurring``: a provider's one-time purchase
+            # event (same email, no subscription ref) must never be reconciled
+            # against a subscription row — that would record a spurious monthly
+            # payment in the revenue ledger for what was a one-time unlock.
             # Safe: only signature-verified events reach this point. Limitation
             # (accepted, solo platform): with several non-terminal rows for one
             # email the latest by id is chosen.
@@ -312,6 +321,37 @@ class SubscriptionService:
             subscription.current_period_start = event.period_start
         if event.period_end is not None:
             subscription.current_period_end = event.period_end
+
+        # Revenue ledger: every *completed monthly payment* records one tier
+        # payment for the creator. The money signal is ``payment_succeeded``
+        # (Stripe invoice.paid / PayPal PAYMENT.SALE.COMPLETED / Wompi APROBADA
+        # all normalize to it, activation and renewals alike). The mock dev
+        # provider never sends a payment event for its hosted activation, so
+        # its subscription-created/updated transition into ``active`` counts as
+        # the first month (Stripe also sends a subscription.created on checkout
+        # completion, but its invoice.paid already records the charge — so the
+        # transition rule stays scoped to mock to avoid double-counting).
+        # Written in the same transaction as the reconciliation: a duplicate
+        # event (IntegrityError rollback) records nothing.
+        payment_completed = event.event_type == WebhookEventType.payment_succeeded or (
+            event.provider == "mock"
+            and event.event_type
+            in (WebhookEventType.subscription_created, WebhookEventType.subscription_updated)
+            and new_status == SubscriptionStatus.active
+            and previous_status != SubscriptionStatus.active
+        )
+        if payment_completed:
+            self.db.add(
+                Payment(
+                    creator_id=subscription.creator_id,
+                    subscriber_id=subscription.subscriber_id,
+                    kind="subscription",
+                    amount_cents=settings.SUBSCRIPTION_TIER_PRICE_CENTS,
+                    status="completed",
+                    payment_provider=event.provider,
+                    external_ref=event.external_ref,
+                )
+            )
 
         # Persist the reconciliation and the idempotency marker atomically:
         # either both land (the event is acknowledged exactly once) or neither

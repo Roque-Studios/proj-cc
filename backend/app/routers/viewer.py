@@ -56,7 +56,9 @@ def creator_feed(
     except **paid broadcasts** they haven't unlocked, which come back as a
     locked preview (``unlocked: false``, media urls withheld, one-time price
     shown). Anonymous and registered non-followers get a teaser: post captions
-    and media counts, with media urls withheld (``teaser: true``).
+    and media counts, with media urls withheld (``teaser: true``). Posts the
+    creator hid (``is_visible=False``) are excluded from the feed entirely —
+    the creator manages them from the content dashboard.
     """
     creator = db.get(User, creator_id)
     if creator is None or creator.role != UserRole.creator or not creator.is_active:
@@ -69,14 +71,20 @@ def creator_feed(
         db.scalar(
             select(func.count())
             .select_from(Post)
-            .where(Post.creator_id == creator_id)
+            .where(
+                Post.creator_id == creator_id,
+                Post.is_visible.is_(True),
+            )
         )
         or 0
     )
     posts = db.scalars(
         select(Post)
         .options(selectinload(Post.media))
-        .where(Post.creator_id == creator_id)
+        .where(
+            Post.creator_id == creator_id,
+            Post.is_visible.is_(True),
+        )
         .order_by(Post.created_at.desc(), Post.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
