@@ -1,7 +1,6 @@
-import os
-
 import structlog
 from dotenv import load_dotenv
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 logger = structlog.get_logger()
@@ -12,11 +11,12 @@ _INSECURE_SECRET_KEY_PLACEHOLDER = "change_this_in_production_please"
 
 
 class Settings(BaseSettings):
-    # Required
-    DATABASE_URL: str
-    REDIS_URL: str
-    SECRET_KEY: str
-    CC_VERSION: str
+    # Required — non-empty so the app fails fast (with a clear error) if any is
+    # missing OR set to an empty string (e.g. an unset compose interpolation).
+    DATABASE_URL: str = Field(min_length=1)
+    REDIS_URL: str = Field(min_length=1)
+    SECRET_KEY: str = Field(min_length=1)
+    CC_VERSION: str = Field(min_length=1)
 
     # Optional with defaults
     ENVIRONMENT: str = "dev"
@@ -26,13 +26,49 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 21600
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 10080
-    DEFAULT_ADMIN_EMAIL: str = "admin@fantasysv.com"
+    DEFAULT_ADMIN_EMAIL: str = "admin@admin.com"
     DEFAULT_ADMIN_PASSWORD: str = "admin"
+
+    # Celery (empty values fall back to REDIS_URL on dedicated Redis DBs, see properties below)
+    CELERY_BROKER_URL: str = ""
+    CELERY_RESULT_BACKEND: str = ""
+
+    # Watermarked media cache (Redis)
+    WATERMARK_CACHE_REDIS_URL: str = ""
+    WATERMARK_CACHE_TTL_SECONDS: int = 3600
+
+    # JWT token revocation list (Redis; defaults to REDIS_URL, DB 3)
+    TOKEN_REVOCATION_REDIS_URL: str = ""
 
     @property
     def cors_origins(self) -> list[str]:
         """Parse ALLOWED_ORIGINS (comma-separated) into a list."""
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
+
+    def _redis_db_url(self, db_index: int) -> str:
+        """Rewrite the DB index of REDIS_URL (e.g. redis://host:6379/0 -> /1)."""
+        base = self.REDIS_URL.rsplit("/", 1)[0]
+        return f"{base}/{db_index}"
+
+    @property
+    def celery_broker_url(self) -> str:
+        """Celery broker URL (defaults to REDIS_URL, DB 0)."""
+        return self.CELERY_BROKER_URL or self.REDIS_URL
+
+    @property
+    def celery_result_backend(self) -> str:
+        """Celery result backend URL (defaults to REDIS_URL, DB 1)."""
+        return self.CELERY_RESULT_BACKEND or self._redis_db_url(1)
+
+    @property
+    def watermark_cache_redis_url(self) -> str:
+        """Redis URL for the watermarked media cache (defaults to REDIS_URL, DB 2)."""
+        return self.WATERMARK_CACHE_REDIS_URL or self._redis_db_url(2)
+
+    @property
+    def token_revocation_redis_url(self) -> str:
+        """Redis URL for the JWT revocation list (defaults to REDIS_URL, DB 3)."""
+        return self.TOKEN_REVOCATION_REDIS_URL or self._redis_db_url(3)
 
     class Config:
         env_file = ".env"
@@ -44,6 +80,14 @@ def get_settings() -> Settings:
         logger.info("Loading application settings")
         settings = Settings()  # Pydantic will validate and raise if missing
         logger.info("Settings loaded successfully")
+
+        # Reject blank/whitespace-only secrets (Field(min_length=1) still allows "   ").
+        if not settings.SECRET_KEY.strip():
+            raise RuntimeError(
+                "SECRET_KEY must not be empty or whitespace. "
+                'Generate a strong key with: python -c "import secrets; print(secrets.token_hex(32))" '
+                "and set it in your environment before starting."
+            )
 
         # Startup security check: reject insecure SECRET_KEY in production.
         if settings.ENVIRONMENT == "prod":
