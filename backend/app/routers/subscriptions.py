@@ -1,8 +1,8 @@
 """Subscription endpoints.
 
-- ``POST /subscribe`` starts a subscription to a creator at the single defined
-  monthly tier (``SUBSCRIPTION_TIER_PLAN_ID``), opening a hosted checkout with
-  the configured gateway. The row is created as ``incomplete`` (pending
+- ``POST /subscribe`` starts a subscription to a creator at the monthly tier,
+  opening a hosted checkout with **one of the creator's enabled gateways** (see
+  ``CreatorGatewayConfig``). The row is created as ``incomplete`` (pending
   payment); a successful payment webhook activates it, a failed one leaves it
   incomplete.
 - ``POST /cancel`` sets non-renew on a subscription: access persists until
@@ -14,11 +14,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from ..config import settings
 from ..database import get_db
 from ..deps import get_current_user
+from ..gateways import is_config_complete
 from ..models import Subscription, SubscriptionStatus, User, UserRole
+from ..payments import PaymentProvider, ProviderConfigurationError
+from ..payments.factory import build_provider_from_config, resolve_plan_id
 from ..schemas import CancelRequest, SubscribeRequest, SubscribeResponse, SubscriptionOut
+from ..services.gateways import enabled_configured_gateways, get_gateway_row
 from ..services.subscriptions import SubscriptionService
 
 router = APIRouter(tags=["subscriptions"])
@@ -51,11 +54,15 @@ def subscribe(
             detail="You cannot subscribe to yourself",
         )
 
-    service = SubscriptionService(db)
+    # Resolve the payment gateway: the client may pick one of the creator's
+    # enabled gateways explicitly; otherwise a single enabled+configured
+    # gateway is used (ambiguous/absent -> 400 so the checkout UI can react).
+    gateway, provider, plan_id = _resolve_gateway(db, creator.id, payload.provider)
+    service = SubscriptionService(db, provider=provider)
     subscription = service.create_subscription(
         subscriber_id=user.id,
         creator_id=creator.id,
-        plan_id=settings.SUBSCRIPTION_TIER_PLAN_ID,
+        plan_id=plan_id,
         success_url=payload.success_url,
         cancel_url=payload.cancel_url,
     )
@@ -92,3 +99,53 @@ def cancel(
         )
     service = SubscriptionService(db)
     return service.cancel_at_period_end(subscription)
+
+
+def _resolve_gateway(
+    db: Session,
+    creator_id: int,
+    provider: str | None,
+) -> tuple[str, PaymentProvider, str]:
+    """Resolve (gateway name, provider instance, plan id) for a creator.
+
+    Strictly per-creator: the gateway must be one the creator enabled **with a
+    complete config** — platform env credentials are never used for checkout.
+    """
+    requested = provider.strip().lower() if provider else ""
+    if requested:
+        row = get_gateway_row(db, creator_id, requested)
+        if row is None or not row.enabled or not is_config_complete(requested, row.config):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Gateway '{requested}' is not enabled for this creator "
+                    "(or its configuration is incomplete)"
+                ),
+            )
+        gateway = requested
+        config = row.config
+    else:
+        enabled = enabled_configured_gateways(db, creator_id)
+        if not enabled:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Creator has no payment gateway enabled",
+            )
+        if len(enabled) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Creator has multiple payment gateways enabled — "
+                    "specify which one to use"
+                ),
+            )
+        gateway, row = enabled[0]
+        config = row.config
+    try:
+        provider = build_provider_from_config(gateway, config)
+    except ProviderConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Gateway '{gateway}' configuration is invalid: {exc}",
+        )
+    return gateway, provider, resolve_plan_id(gateway, config)

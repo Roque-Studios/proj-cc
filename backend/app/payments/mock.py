@@ -34,6 +34,7 @@ _MOCK_EVENT_MAP = {
     "subscription.canceled": WebhookEventType.subscription_canceled,
     "payment.succeeded": WebhookEventType.payment_succeeded,
     "payment.failed": WebhookEventType.payment_failed,
+    "payment.refunded": WebhookEventType.payment_refunded,
 }
 
 

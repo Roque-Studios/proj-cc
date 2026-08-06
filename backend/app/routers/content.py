@@ -149,7 +149,8 @@ def unlock_broadcast(
 
     Subscriber-only (an active subscription to the broadcast's creator is
     required). Idempotent: repeating an already-paid unlock returns the
-    existing ``BroadcastUnlock`` row without a second charge.
+    existing ``PaidUnlock`` row without a second charge; a refunded unlock is
+    treated as locked and can be re-purchased.
     """
     post = db.get(Post, post_id)
     if post is None:
@@ -183,6 +184,8 @@ def unlock_broadcast(
         )
 
     service = BroadcastService(db)
+    # get_unlock returns only *active* unlocks, so a refunded unlock falls
+    # through to unlock() which charges again and reactivates the row.
     existing = service.get_unlock(ctx.user.id, post.id)
     if existing is not None:
         return JSONResponse(

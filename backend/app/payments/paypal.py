@@ -9,6 +9,7 @@ Orders v2 for one-time charges.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Mapping
 
 import httpx
@@ -48,11 +49,31 @@ _EVENT_MAP = {
     "BILLING.SUBSCRIPTION.SUSPENDED": WebhookEventType.subscription_updated,
     "PAYMENT.SALE.COMPLETED": WebhookEventType.payment_succeeded,
     "PAYMENT.SALE.DENIED": WebhookEventType.payment_failed,
+    # One-time Orders v2 captures/refunds (the capture's ``custom_id`` carries
+    # the charge metadata we stamped, used to match the local unlock row).
+    "PAYMENT.CAPTURE.REFUNDED": WebhookEventType.payment_refunded,
+    "PAYMENT.REFUND.COMPLETED": WebhookEventType.payment_refunded,
+    # A refunded subscription renewal: the charge is refunded but the
+    # subscription itself is untouched. Routed to the refund path, where it is
+    # a safe no-op (the sale carries no post metadata to match an unlock) — so
+    # PayPal receives a 200 instead of a 400-triggered retry loop.
+    "PAYMENT.SALE.REFUNDED": WebhookEventType.payment_refunded,
 }
 
 
 def _normalize_status(status: str | None) -> str:
     return _STATUS_MAP.get(status or "", "active")
+
+
+def _iso_to_dt(value: str | None) -> datetime | None:
+    """Parse a PayPal RFC3339 timestamp (e.g. ``2026-08-06T12:00:00Z``) to aware UTC."""
+    if not value:
+        return None
+    try:
+        # fromisoformat accepts ``+00:00``; normalize the trailing ``Z``.
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
 
 
 class PayPalPaymentProvider(PaymentProvider):
@@ -65,6 +86,8 @@ class PayPalPaymentProvider(PaymentProvider):
         webhook_id: str,
         environment: str = "sandbox",
         timeout: float = 30.0,
+        product_id: str | None = None,
+        transport: httpx.BaseTransport | None = None,
     ) -> None:
         if not client_id or not client_secret:
             raise ProviderConfigurationError(
@@ -72,12 +95,97 @@ class PayPalPaymentProvider(PaymentProvider):
             )
         if not webhook_id:
             raise ProviderConfigurationError("PayPal webhook id is required")
+        if environment not in ("sandbox", "live"):
+            raise ProviderConfigurationError(
+                f"PAYPAL_ENVIRONMENT must be 'sandbox' or 'live', got '{environment}'"
+            )
         base = _LIVE_BASE if environment == "live" else _SANDBOX_BASE
         self.client_id = client_id
         self.client_secret = client_secret
         self.webhook_id = webhook_id
-        self._client = httpx.Client(base_url=base, timeout=timeout)
+        self.environment = environment
+        # Existing product to attach billing plans to (created via the bootstrap
+        # script or the PayPal dashboard); created lazily when absent.
+        self.product_id = product_id or None
+        # ``transport`` is injected in tests (httpx.MockTransport) to simulate
+        # the PayPal API; in production it is None and real HTTP is used.
+        self._client = httpx.Client(base_url=base, timeout=timeout, transport=transport)
         self._access_token: str | None = None
+
+    # ------------------------------------------------------------------ #
+    # Billing-plan bootstrap (product + monthly plan)
+    # ------------------------------------------------------------------ #
+
+    def create_plan(
+        self,
+        name: str,
+        price_cents: int,
+        currency: str = "usd",
+        product_id: str | None = None,
+    ) -> dict:
+        """Create an ACTIVE fixed-price monthly billing plan (usable immediately).
+
+        PayPal subscriptions require a billing plan that exists at the gateway,
+        so a fresh sandbox (or production) account needs one before
+        ``/v1/billing/subscriptions`` will accept ``plan_id``. The plan is
+        created under ``product_id`` (or a product created on demand) and the
+        returned id (``P-...``) is what the operator sets as
+        ``SUBSCRIPTION_TIER_PLAN_ID``. Returns the full plan object.
+        """
+        if price_cents <= 0:
+            raise ProviderConfigurationError(
+                "Plan price must be a positive amount in cents"
+            )
+        product = self._ensure_product(product_id)
+        body = {
+            "product_id": product["id"],
+            "name": name,
+            "billing_cycles": [
+                {
+                    "frequency": {
+                        "interval_unit": "MONTH",
+                        "interval_count": 1,
+                    },
+                    "tenure_type": "REGULAR",
+                    "sequence": 1,
+                    "total_cycles": 0,  # 0 = infinite (monthly, until canceled)
+                    "pricing_scheme": {
+                        "fixed_price": {
+                            "value": f"{price_cents / 100:.2f}",
+                            "currency_code": currency,
+                        }
+                    },
+                }
+            ],
+            "payment_preferences": {
+                "auto_bill_outstanding": True,
+                "payment_failure_threshold": 1,
+            },
+        }
+        resp = self._client.post(
+            "/v1/billing/plans", headers=self._auth_headers(), json=body
+        )
+        self._raise_for_status(resp)
+        return resp.json()
+
+    def _ensure_product(self, product_id: str | None = None) -> dict:
+        """Return an existing product or create one (cached on the provider)."""
+        product_id = product_id or self.product_id
+        if product_id:
+            return {"id": product_id}
+        body = {
+            "name": "Content Creator Engine",
+            "description": "Creator subscriptions and one-time content unlocks",
+            "type": "SERVICE",
+            "category": "SOFTWARE",
+        }
+        resp = self._client.post(
+            "/v1/catalogs/products", headers=self._auth_headers(), json=body
+        )
+        self._raise_for_status(resp)
+        product = resp.json()
+        self.product_id = product["id"]  # reuse for future plans
+        return product
 
     # ------------------------------------------------------------------ #
     # Interface
@@ -171,15 +279,55 @@ class PayPalPaymentProvider(PaymentProvider):
             )
 
         resource = payload.get("resource", {})
+        # Renewal events (``PAYMENT.SALE.*``) carry the *sale* as the resource:
+        # its own ``id`` is a sale id, while ``billing_agreement_id`` is the
+        # subscription id (``I-...``) our local row was created with — so it
+        # must win for reconciliation to find the subscription. Subscription
+        # lifecycle events (``BILLING.SUBSCRIPTION.*``) are the subscription
+        # itself and match by ``id`` either way (subscription resources carry no
+        # ``billing_agreement_id``; the subscription id *is* the agreement id).
+        external_ref = (
+            resource.get("billing_agreement_id")
+            or resource.get("id")
+            or payload.get("resource_id")
+        )
+        # One-time orders stamp ``custom_id`` with the charge metadata JSON; the
+        # capture/refund resources carry it through, so refund events can match
+        # the local unlock even though the resource id (capture id) differs
+        # from the order id we stored as the external ref.
+        custom_id = resource.get("custom_id")
+        try:
+            metadata = json.loads(custom_id) if custom_id else {}
+        except (TypeError, ValueError):
+            metadata = {}
+        subscription_status = _normalize_status(
+            resource.get("status") or payload.get("resource_status")
+        )
+        # PayPal events don't expose the billing period. Approximate a 30-day
+        # cycle from the resource's create time (the billing date) **only for
+        # events that reconcile to an active/trialing subscription** — a failed
+        # renewal (``SALE.DENIED``) or a refund must not stamp a future window
+        # the cycle never started. The service applies the period only when
+        # ``period_end`` is present.
+        period_start = period_end = None
+        stamps_period = event_type == WebhookEventType.payment_succeeded or (
+            event_type
+            in (WebhookEventType.subscription_created, WebhookEventType.subscription_updated)
+            and subscription_status in ("active", "trialing")
+        )
+        if stamps_period:
+            period_start = _iso_to_dt(resource.get("create_time"))
+            if period_start is not None:
+                period_end = period_start + timedelta(days=30)
         return WebhookEvent(
             provider=self.name,
             event_type=event_type,
-            external_ref=resource.get("id") or payload.get("resource_id"),
+            external_ref=external_ref,
             id=payload.get("id"),
-            subscription_status=_normalize_status(
-                resource.get("status") or payload.get("resource_status")
-            ),
-            metadata={},
+            subscription_status=subscription_status,
+            period_start=period_start,
+            period_end=period_end,
+            metadata=metadata,
             raw=payload,
         )
 
@@ -245,4 +393,5 @@ class PayPalPaymentProvider(PaymentProvider):
             client_secret=settings.PAYPAL_CLIENT_SECRET,
             webhook_id=settings.PAYPAL_WEBHOOK_ID,
             environment=getattr(settings, "PAYPAL_ENVIRONMENT", "sandbox"),
+            product_id=getattr(settings, "PAYPAL_PRODUCT_ID", "") or None,
         )

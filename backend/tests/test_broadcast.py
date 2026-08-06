@@ -4,9 +4,10 @@ Acceptance: a paid broadcast goes to all subscribers as a **locked preview**
 (metadata only — no media urls) until the subscriber pays the one-time unlock;
 after the unlock they get full media access. The creator always has full
 access. Unit tests cover the lock/unlock state machine (charge recorded,
-idempotent repeat, failed charge grants nothing); integration tests cover the
-full lock -> unlock -> full-access flow over the feed, media and unlock
-endpoints.
+idempotent repeat, failed charge grants nothing, refund revokes); integration
+tests cover the full lock -> unlock -> full-access flow over the feed, media
+and unlock endpoints plus the success / failure / refund acceptance scenarios
+for the one-time charge (``PaidUnlock`` records).
 """
 
 from __future__ import annotations
@@ -18,8 +19,8 @@ import pytest
 from PIL import Image
 from sqlalchemy import select
 
-from app.models import BroadcastUnlock, Post, Subscription, SubscriptionStatus, User, UserRole
-from app.payments.base import ChargeResult
+from app.models import PaidUnlock, Post, Subscription, SubscriptionStatus, User, UserRole
+from app.payments.base import ChargeResult, WebhookEvent, WebhookEventType
 from app.payments.mock import MockPaymentProvider
 from app.services.broadcasts import (
     BroadcastNotPaidError,
@@ -294,7 +295,7 @@ def test_unlock_is_idempotent_returns_existing_row(client, db_session):
 
     with db_session as db:
         row_ids = db.scalars(
-            select(BroadcastUnlock.id).where(BroadcastUnlock.post_id == post["id"])
+            select(PaidUnlock.id).where(PaidUnlock.post_id == post["id"])
         ).all()
     assert row_ids == [first.json()["unlock"]["id"]]  # exactly one row, unchanged
 
@@ -448,3 +449,287 @@ def test_service_unlock_regular_post_raises(db_session):
 
     with pytest.raises(BroadcastNotPaidError):
         service.unlock(subscriber.id, post)
+
+
+# --------------------------------------------------------------------------- #
+# Refund webhooks (access revocation) — unit state machine
+# --------------------------------------------------------------------------- #
+
+def test_service_refund_revokes_and_repurchase_reactivates(db_session):
+    """A refund revokes access; re-purchase charges again and reactivates the row."""
+    db = db_session
+    creator = _create_creator(db)
+    post = _create_post(db, creator, price_cents=500)
+    subscriber = _create_subscriber(db)
+    provider = MockPaymentProvider()
+    service = BroadcastService(db, provider=provider)
+
+    unlock, created = service.unlock(subscriber.id, post)
+    assert created is True
+    assert service.is_unlocked(subscriber.id, post.id) is True
+    first_ref = unlock.external_ref
+
+    # Refund webhook (matched by external ref) revokes access.
+    event = service.handle_refunded(
+        WebhookEvent(
+            provider="mock",
+            event_type=WebhookEventType.payment_refunded,
+            external_ref=first_ref,
+            id="evt_refund_unit_1",
+        )
+    )
+    assert event.duplicate is False
+    db.refresh(unlock)
+    assert unlock.refunded_at is not None
+    assert service.is_unlocked(subscriber.id, post.id) is False
+    assert service.unlocked_post_ids(subscriber.id, [post.id]) == set()
+    assert len(provider.charges) == 1
+
+    # Re-purchase: a fresh charge, the SAME row reactivated (still one row).
+    again, created2 = service.unlock(subscriber.id, post)
+    assert created2 is True
+    assert again.id == unlock.id
+    db.refresh(again)
+    assert again.refunded_at is None
+    assert again.external_ref != first_ref  # fresh charge went through
+    assert service.is_unlocked(subscriber.id, post.id) is True
+    assert len(provider.charges) == 2
+    with db:
+        rows = db.scalars(
+            select(PaidUnlock).where(PaidUnlock.post_id == post.id)
+        ).all()
+    assert len(rows) == 1
+
+
+def test_service_refund_matches_by_metadata_fallback(db_session):
+    """Refunds carrying a foreign ref (PayPal capture id) match via metadata."""
+    db = db_session
+    creator = _create_creator(db)
+    post = _create_post(db, creator, price_cents=700)
+    subscriber = _create_subscriber(db)
+    service = BroadcastService(db, provider=MockPaymentProvider())
+
+    unlock, created = service.unlock(subscriber.id, post)
+    assert created is True
+
+    event = service.handle_refunded(
+        WebhookEvent(
+            provider="mock",
+            event_type=WebhookEventType.payment_refunded,
+            external_ref="cap_foreign_1",  # not the ref we stored
+            id="evt_refund_meta_1",
+            metadata={
+                "subscriber_id": str(subscriber.id),
+                "post_id": str(post.id),
+            },
+        )
+    )
+    assert event.duplicate is False
+    db.refresh(unlock)
+    assert unlock.refunded_at is not None
+    assert service.is_unlocked(subscriber.id, post.id) is False
+
+
+def test_service_refund_redelivery_is_duplicate(db_session):
+    """A provider retry of the same refund event is acknowledged, not re-applied."""
+    db = db_session
+    creator = _create_creator(db)
+    post = _create_post(db, creator, price_cents=500)
+    subscriber = _create_subscriber(db)
+    service = BroadcastService(db, provider=MockPaymentProvider())
+
+    unlock, _ = service.unlock(subscriber.id, post)
+    ref = unlock.external_ref
+
+    def _event() -> WebhookEvent:
+        # Fresh instance per delivery (the router builds one per request); the
+        # service mutates the event's ``duplicate`` flag in place.
+        return WebhookEvent(
+            provider="mock",
+            event_type=WebhookEventType.payment_refunded,
+            external_ref=ref,
+            id="evt_refund_dup_1",
+        )
+
+    first = service.handle_refunded(_event())
+    assert first.duplicate is False
+    second = service.handle_refunded(_event())
+    assert second.duplicate is True
+
+
+def test_service_refund_unknown_charge_is_noop(db_session):
+    """A refund for an unknown charge changes nothing and stays unprocessed."""
+    db = db_session
+    creator = _create_creator(db)
+    _create_post(db, creator, price_cents=500)
+    subscriber = _create_subscriber(db)
+    service = BroadcastService(db, provider=MockPaymentProvider())
+
+    event = service.handle_refunded(
+        WebhookEvent(
+            provider="mock",
+            event_type=WebhookEventType.payment_refunded,
+            external_ref="ch_never_charged",
+            id="evt_refund_unknown_1",
+        )
+    )
+    assert event.duplicate is False
+    assert service.db.scalar(select(PaidUnlock)) is None
+
+
+# --------------------------------------------------------------------------- #
+# One-time charge acceptance: success / failure / refund (end to end)
+# --------------------------------------------------------------------------- #
+
+def test_integration_failed_charge_grants_no_unlock(client, db_session, monkeypatch):
+    """A failed one-time charge creates no PaidUnlock and grants no access."""
+
+    class _FailingProvider:
+        name = "mock"
+
+        def charge_one_time(self, request):
+            return ChargeResult(
+                external_ref="ch_fail_1",
+                status="failed",
+                amount_cents=request.amount_cents,
+                currency=request.currency,
+                raw={},
+            )
+
+    monkeypatch.setattr(
+        "app.services.broadcasts.get_payment_provider",
+        lambda settings: _FailingProvider(),
+    )
+    creator_token = _make_creator(client)
+    post = _upload_post(client, creator_token, price_cents=500)
+    fan_token, _ = _make_fan_follower(client, db_session)
+
+    resp = client.post(f"/content/{post['id']}/unlock", headers=_bearer(fan_token))
+    assert resp.status_code == 402  # payment required
+    assert client.get(_media_url(post), headers=_bearer(fan_token)).status_code == 403
+    with db_session as db:
+        assert db.scalar(
+            select(PaidUnlock).where(PaidUnlock.post_id == post["id"])
+        ) is None
+
+
+def _refund_webhook(
+    external_ref: str,
+    metadata: dict,
+    event_id: str,
+) -> tuple[bytes, dict]:
+    body = MockPaymentProvider.make_webhook_body(
+        "payment.refunded",
+        external_ref=external_ref,
+        metadata=metadata,
+        event_id=event_id,
+    )
+    headers = MockPaymentProvider.sign_body(body)
+    headers["Content-Type"] = "application/json"
+    return body, headers
+
+
+def test_refund_webhook_revokes_unlock_access(client, db_session):
+    """Acceptance (refund): a gateway refund revokes access to that content only."""
+    creator_token = _make_creator(client)
+    post = _upload_post(client, creator_token, caption="Pay to see", price_cents=500)
+    fan_token, fan_id = _make_fan_follower(client, db_session)
+    post_id = post["id"]
+    creator_id = post["creator_id"]
+
+    # Success: unlock grants full media access and creates the PaidUnlock row.
+    unlock = client.post(f"/content/{post_id}/unlock", headers=_bearer(fan_token))
+    assert unlock.status_code == 201
+    charge_ref = unlock.json()["unlock"]["external_ref"]
+    assert client.get(_media_url(post), headers=_bearer(fan_token)).status_code == 200
+    with db_session as db:
+        row = db.scalar(select(PaidUnlock).where(PaidUnlock.post_id == post_id))
+        assert row is not None and row.refunded_at is None
+
+    # The gateway refunds the charge -> signed webhook -> access revoked.
+    body, headers = _refund_webhook(
+        charge_ref,
+        {"subscriber_id": str(fan_id), "post_id": str(post_id)},
+        "evt_refund_integration_1",
+    )
+    resp = client.post("/webhooks/mock", data=body, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["event_type"] == "payment.refunded"
+    assert resp.json()["duplicate"] is False
+
+    # Revoked: media 403, feed shows the broadcast locked again.
+    assert client.get(_media_url(post), headers=_bearer(fan_token)).status_code == 403
+    feed = client.get(f"/creators/{creator_id}/posts", headers=_bearer(fan_token))
+    item = feed.json()["posts"][0]
+    assert item["unlocked"] is False
+    assert item["media"][0]["media_url"] is None
+    with db_session as db:
+        revoked = db.scalar(select(PaidUnlock).where(PaidUnlock.post_id == post_id))
+        assert revoked is not None and revoked.refunded_at is not None
+
+
+def test_refund_webhook_redelivery_is_duplicate(client, db_session):
+    """A provider retry of the same refund event is acked, not double-applied."""
+    creator_token = _make_creator(client)
+    post = _upload_post(client, creator_token, price_cents=500)
+    fan_token, fan_id = _make_fan_follower(client, db_session)
+    post_id = post["id"]
+
+    unlock = client.post(f"/content/{post_id}/unlock", headers=_bearer(fan_token))
+    charge_ref = unlock.json()["unlock"]["external_ref"]
+    body, headers = _refund_webhook(
+        charge_ref,
+        {"subscriber_id": str(fan_id), "post_id": str(post_id)},
+        "evt_refund_retry_1",
+    )
+
+    first = client.post("/webhooks/mock", data=body, headers=headers)
+    second = client.post("/webhooks/mock", data=body, headers=headers)
+    assert first.json()["duplicate"] is False
+    assert second.json()["duplicate"] is True
+    assert client.get(_media_url(post), headers=_bearer(fan_token)).status_code == 403
+
+
+def test_subscriber_repurchases_after_refund(client, db_session):
+    """After a refund the subscriber can pay again to regain access."""
+    creator_token = _make_creator(client)
+    post = _upload_post(client, creator_token, price_cents=500)
+    fan_token, fan_id = _make_fan_follower(client, db_session)
+    post_id = post["id"]
+
+    unlock = client.post(f"/content/{post_id}/unlock", headers=_bearer(fan_token))
+    charge_ref = unlock.json()["unlock"]["external_ref"]
+    body, headers = _refund_webhook(
+        charge_ref,
+        {"subscriber_id": str(fan_id), "post_id": str(post_id)},
+        "evt_refund_repurchase_1",
+    )
+    assert client.post("/webhooks/mock", data=body, headers=headers).status_code == 200
+    assert client.get(_media_url(post), headers=_bearer(fan_token)).status_code == 403
+
+    # Re-purchase: 201 (a fresh charge), access restored, exactly one row.
+    again = client.post(f"/content/{post_id}/unlock", headers=_bearer(fan_token))
+    assert again.status_code == 201
+    assert again.json()["already_unlocked"] is False
+    assert again.json()["unlock"]["refunded_at"] is None
+    assert client.get(_media_url(post), headers=_bearer(fan_token)).status_code == 200
+    with db_session as db:
+        rows = db.scalars(
+            select(PaidUnlock).where(PaidUnlock.post_id == post_id)
+        ).all()
+        assert len(rows) == 1  # same row, reactivated
+        assert rows[0].refunded_at is None
+
+
+def test_refund_webhook_unknown_charge_is_noop(client, db_session):
+    """A refund for a charge we never recorded is accepted but changes nothing."""
+    body, headers = _refund_webhook(
+        "ch_never_recorded",
+        {"subscriber_id": "1", "post_id": "1"},
+        "evt_refund_noop_1",
+    )
+    resp = client.post("/webhooks/mock", data=body, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["event_type"] == "payment.refunded"
+    with db_session as db:
+        assert db.scalar(select(PaidUnlock)) is None

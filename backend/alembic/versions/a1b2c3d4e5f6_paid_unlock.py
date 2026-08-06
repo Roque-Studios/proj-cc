@@ -1,4 +1,4 @@
-'''paid broadcasts + broadcast_unlock table
+'''paid broadcasts + paid_unlock table
 
 Revision ID: a1b2c3d4e5f6
 Revises: 9f1a2b3c4d5e
@@ -6,8 +6,9 @@ Create Date: 2026-08-06
 
 Paid broadcasts: a post with ``broadcast_price_cents`` set is a paid broadcast
 (sent to all subscribers as a locked preview; each subscriber pays a one-time
-price to unlock full media access). ``broadcast_unlock`` records those one-time
-payments, one row per (subscriber, post).
+price to unlock full media access). ``paid_unlock`` records those one-time
+payments, one row per (subscriber, post); ``refunded_at`` marks a charge the
+gateway refunded (access revoked until re-purchase).
 '''
 
 from alembic import op
@@ -27,7 +28,7 @@ def upgrade() -> None:
     )
 
     op.create_table(
-        "broadcast_unlock",
+        "paid_unlock",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column(
             "subscriber_id",
@@ -43,6 +44,7 @@ def upgrade() -> None:
         ),
         sa.Column("payment_provider", sa.String(length=50), nullable=True),
         sa.Column("external_ref", sa.String(length=255), nullable=True),
+        sa.Column("refunded_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -52,16 +54,14 @@ def upgrade() -> None:
         sa.UniqueConstraint(
             "subscriber_id",
             "post_id",
-            name="uq_broadcast_unlock_subscriber_post",
+            name="uq_paid_unlock_subscriber_post",
         ),
     )
-    op.create_index("ix_broadcast_unlock_id", "broadcast_unlock", ["id"])
-    op.create_index(
-        "ix_broadcast_unlock_subscriber_id", "broadcast_unlock", ["subscriber_id"]
-    )
-    op.create_index("ix_broadcast_unlock_post_id", "broadcast_unlock", ["post_id"])
+    op.create_index("ix_paid_unlock_id", "paid_unlock", ["id"])
+    op.create_index("ix_paid_unlock_subscriber_id", "paid_unlock", ["subscriber_id"])
+    op.create_index("ix_paid_unlock_post_id", "paid_unlock", ["post_id"])
 
 
 def downgrade() -> None:
-    op.drop_table("broadcast_unlock")
+    op.drop_table("paid_unlock")
     op.drop_column("post", "broadcast_price_cents")

@@ -3,14 +3,15 @@
 Covers: auth guard, creator validation, pending (incomplete) creation with a
 checkout url, idempotency, and that the payment success/failure webhook paths
 (active with period dates / stays incomplete) are reachable from the service
-behind the endpoint.
+behind the endpoint. Gateways are strictly per-creator, so test creators
+enable the zero-config ``mock`` gateway before subscribing.
 """
 
 from __future__ import annotations
 
 from sqlalchemy import select
 
-from app.models import Subscription, SubscriptionStatus, User, UserRole
+from app.models import CreatorGatewayConfig, Subscription, SubscriptionStatus, User, UserRole
 from app.payments.mock import MockPaymentProvider
 from app.services.subscriptions import SubscriptionService
 
@@ -28,6 +29,19 @@ def _register(client, email: str, password: str = "Passw0rd1") -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _enable_mock_gateway(db, creator_id: int) -> None:
+    """The mock gateway needs no credentials — enabling it is one row."""
+    db.add(
+        CreatorGatewayConfig(
+            creator_id=creator_id,
+            gateway="mock",
+            enabled=True,
+            config={},
+        )
+    )
+    db.commit()
+
+
 def _make_creator(db, email: str = "creator@example.com") -> User:
     creator = User(
         email=email,
@@ -39,6 +53,7 @@ def _make_creator(db, email: str = "creator@example.com") -> User:
     db.add(creator)
     db.commit()
     db.refresh(creator)
+    _enable_mock_gateway(db, creator.id)
     return creator
 
 

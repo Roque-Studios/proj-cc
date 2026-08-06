@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Creator Gateway Settings</title>
+        <!--
+            Private admin page: NOT linked from anywhere on the site. It is
+            only reachable by entering this URL directly (e.g.
+            http://localhost/settings.html). Login with the seeded creator
+            account (python -m app.seed_creator).
+        -->
+        <script
+            type="module"
+            src="/src/pages/creator-settings-app.ts"
+        ></script>
+        <style>
+            body {
+                margin: 0;
+                background-color: #d1e4ef;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            }
+        </style>
+    </head>
+    <body>
+        <roque-settings-app></roque-settings-app>
+    </body>
+</html>

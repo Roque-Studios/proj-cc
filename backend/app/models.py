@@ -49,6 +49,11 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    gateway_configs = relationship(
+        "CreatorGatewayConfig",
+        back_populates="creator",
+        cascade="all, delete-orphan",
+    )
     # passive_deletes: user deletion is delegated to the DB (FK ON DELETE
     # CASCADE). Tests bulk-delete children first since SQLite doesn't enforce FKs.
     subscriptions = relationship(
@@ -186,7 +191,7 @@ class Post(Base):
 
     A post with ``broadcast_price_cents`` set is a **paid broadcast**: it goes
     to all subscribers as a locked preview, and each subscriber needs a one-time
-    payment (``BroadcastUnlock``) for full media access.
+    payment (``PaidUnlock``) for full media access.
     """
 
     __tablename__ = "post"
@@ -216,7 +221,7 @@ class Post(Base):
         order_by="PostMedia.id",
     )
     unlocks = relationship(
-        "BroadcastUnlock",
+        "PaidUnlock",
         back_populates="post",
         cascade="all, delete-orphan",
         # FK has ON DELETE CASCADE: post deletion is delegated to the DB.
@@ -260,21 +265,27 @@ class PostMedia(Base):
         return f"/content/{self.post_id}/media?media_id={self.id}"
 
 
-class BroadcastUnlock(Base):
+class PaidUnlock(Base):
     """A subscriber's one-time paid unlock of a paid broadcast (post).
 
     One row per (subscriber, broadcast): unlocking is a one-time purchase, so
     the unique pair is enforced. The payment is a one-time charge through the
-    payment abstraction (``PaymentProvider.charge_one_time``); the provider
-    ref is kept for reconciliation.
+    payment abstraction (``PaymentProvider.charge_one_time``) — entirely
+    separate from the monthly subscription charge — and the provider ref is
+    kept for reconciliation.
+
+    ``refunded_at`` is set when the gateway refunds the charge (a verified
+    ``payment.refunded`` webhook): access is revoked until the subscriber
+    re-purchases, at which point the same row is reactivated in place (the
+    unique pair still holds one row).
     """
 
-    __tablename__ = "broadcast_unlock"
+    __tablename__ = "paid_unlock"
     __table_args__ = (
         UniqueConstraint(
             "subscriber_id",
             "post_id",
-            name="uq_broadcast_unlock_subscriber_post",
+            name="uq_paid_unlock_subscriber_post",
         ),
     )
 
@@ -293,9 +304,58 @@ class BroadcastUnlock(Base):
     )
     payment_provider = Column(String(50), nullable=True)
     external_ref = Column(String(255), nullable=True)
+    # Set when the gateway refunded this charge — access is revoked until the
+    # subscriber re-purchases (NULL while the unlock is in force).
+    refunded_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     post = relationship("Post", back_populates="unlocks")
+
+
+class CreatorGatewayConfig(Base):
+    """A creator's per-gateway payment configuration.
+
+    One row per (creator, gateway): which gateways the creator accepts for
+    subscriber checkout and the credentials for that gateway. Credentials are
+    **strictly per-creator** — there is no fallback to platform env keys — so a
+    gateway only appears in a subscriber's checkout once the creator enabled it
+    with a complete config (see ``app.gateways`` for the required fields per
+    gateway and the enable validation).
+
+    ``config`` holds the gateway's credential fields as a JSON dict (e.g.
+    ``{"secret_key": "sk_live_...", "webhook_secret": "whsec_..."}``). Secret
+    values are never returned by API responses — read paths surface per-field
+    ``configured`` booleans only.
+    """
+
+    __tablename__ = "creator_gateway_config"
+    __table_args__ = (
+        UniqueConstraint(
+            "creator_id",
+            "gateway",
+            name="uq_creator_gateway_config_creator_gateway",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    creator_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    gateway = Column(String(50), nullable=False)
+    enabled = Column(Boolean, default=False, nullable=False, server_default="false")
+    config = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    creator = relationship("User", back_populates="gateway_configs")
 
 
 class CreatorProfile(Base):

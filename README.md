@@ -44,7 +44,8 @@ a clear error** if any required variable is missing or empty.
 | `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD` | dev defaults | Bootstrap admin credentials — **override in production** |
 | `PAYMENT_PROVIDER` | `mock` | Active payment gateway: `mock`, `stripe`, or `paypal`. Switching is a config change only — the subscription business logic is gateway-agnostic |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_API_BASE` | empty / Stripe base | Stripe credentials — required when `PAYMENT_PROVIDER=stripe` |
-| `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` / `PAYPAL_WEBHOOK_ID` / `PAYPAL_ENVIRONMENT` | empty / `sandbox` | PayPal credentials — required when `PAYMENT_PROVIDER=paypal` |
+| `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` / `PAYPAL_WEBHOOK_ID` / `PAYPAL_ENVIRONMENT` / `PAYPAL_PRODUCT_ID` | empty / `sandbox` / empty | PayPal credentials — required when `PAYMENT_PROVIDER=paypal`. `PAYPAL_ENVIRONMENT` is `sandbox` or `live`; `PAYPAL_PRODUCT_ID` optionally pins the catalog product billing plans attach to |
+| `WOMPI_CLIENT_ID` / `WOMPI_CLIENT_SECRET` / `WOMPI_ENVIRONMENT` / `WOMPI_API_BASE_URL` / `WOMPI_TOKEN_URL` / `WOMPI_DIA_DE_PAGO` / `WOMPI_3DS_REDIRECT_URL` | empty / `sandbox` / SV URLs / `1` / empty | Wompi (El Salvador) credentials — required when `PAYMENT_PROVIDER=wompi`. Environment is per-app (each applicativo is marked sandbox/production in the panel), not a URL switch; `WOMPI_DIA_DE_PAGO` is the monthly charge day; `WOMPI_3DS_REDIRECT_URL` is the post-3DS return URL |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` / `SMTP_TLS` | empty / `587` / … / `true` | Optional SMTP for payment-failure notifications. When `SMTP_HOST` is empty the notify task degrades to a structured log (dev/mock setups) |
 | `ORIGINAL_MEDIA_STORAGE_PATH` / `MAX_MEDIA_SIZE_BYTES` / `ALLOWED_MEDIA_EXTENSIONS` | `/data/media/original` / `10485760` / `.jpg,.jpeg,.png,.webp,.gif` | Where **private unwatermarked originals** live (never served directly — only internal code reads them; `GET /content/{post_id}/media?media_id={id}` serves the original **watermarked on the fly** to the post's creator or an active follower), the per-file size cap, and allowed extensions |
 
@@ -75,11 +76,71 @@ provider; business logic independent of any real gateway).
 All payment flows go through the `PaymentProvider` interface in
 `backend/app/payments/base.py` (create customer, create/cancel subscription,
 verify webhook, charge one-time). Implementations: `mock` (in-memory, default),
-`stripe`, and `paypal` (httpx-based). `backend/app/services/subscriptions.py`
-is the only place that orchestrates the subscription lifecycle, and it depends
-**only** on the interface — so adding a gateway is a one-line registration in
+`stripe`, `paypal` (httpx-based) and `wompi` (Wompi El Salvador, via the
+`pywompi` package). `backend/app/services/subscriptions.py` is the only place
+that orchestrates the subscription lifecycle, and it depends **only** on the
+interface — so adding a gateway is a one-line registration in
 `app/payments/factory.py` plus a provider class, with zero business-logic
 changes. Set `PAYMENT_PROVIDER` to switch.
+
+### Per-creator payment gateways (settings UI)
+
+Gateways are **strictly per-creator**: each creator enables the gateways their
+subscribers can pay with and enters that gateway's **own credentials** (the
+`creator_gateway_config` table, one row per creator+gateway). There is **no
+fallback to platform env keys for checkout** — a gateway only appears in a
+subscriber's checkout once the creator enabled it with a complete config.
+
+Required credentials per gateway: **Stripe** — secret key + webhook secret;
+**PayPal** — client id, client secret, webhook id (+ environment, optional
+plan id); **Wompi** — just `WOMPI_CLIENT_ID` + `WOMPI_CLIENT_SECRET` (plus
+optional environment/payment day); **mock** — none (a zero-config dev
+gateway, backend-only, hidden from the settings UI).
+
+- `GET /api/creator/gateway-settings` — creator-only; returns every gateway's
+  form metadata (labels, placeholders, allowed values) with per-field
+  **`configured` booleans** — secret values are **never** returned.
+- `PUT /api/creator/gateway-settings/{gateway}` — update the enabled flag and
+  config. Enabling a gateway with incomplete required config is a `400`
+  listing the missing fields; environments (sandbox/live) and the Wompi
+  payment day are validated. Config merges over stored values — empty strings
+  keep the existing secret, so updates never wipe what the client can't see.
+- `GET /api/creators/{creator_id}/gateways` — public; the gateways a
+  subscriber can pay with (**only** enabled + configured ones), so checkout
+  UI renders exactly what the creator accepts.
+- `POST /api/subscribe` accepts an optional `provider`; when omitted, a single
+  enabled+configured gateway is used (none → `400`, several → `400` asking to
+  specify one). The provider is built from the creator's stored config (see
+  `app/payments/factory.build_provider_from_config`).
+- **Webhooks** verify against **every registered credential set** for the
+  gateway — the platform env config first (keeps mock/dev flows working),
+  then each creator's stored config — so an event signed with a creator's own
+  webhook secret reconciles. A forged event fails all candidates → `400`.
+
+**Admin page (frontend)** — the settings view lives at `/settings.html` (built
+from the `roque-*` components: cards, switches, text fields, badges, toasts):
+
+1. Seed the creator (admin) account once — this platform treats the creator
+   role as the admin role:
+
+   ```bash
+   docker compose exec api python -m app.seed_creator --email admin@you.io --password 'S3cret!'
+   ```
+
+2. Visit `http://localhost/settings.html` **directly** — the page is not
+   linked from anywhere (by design) and only reachable by typing its URL.
+3. Sign in with the seeded account, then toggle Stripe / PayPal / Wompi and
+   enter each gateway's credentials. A gateway's switch stays disabled until
+   its required config is complete (the backend enforces the same rule).
+
+The frontend uses a token-based fetch client (`frontend/src/lib/api.ts`,
+Bearer access token in localStorage); in dev, `yarn dev` proxies `/api/*` to
+the backend (see `frontend/vite.config.ts`). Covered by
+`backend/tests/test_gateway_settings.py` (guards, enable validation, secret
+non-echo, merge semantics), `test_gateway_subscribe.py` (checkout listing +
+strict per-creator resolution + factory mapping), and
+`test_gateway_webhooks.py` (per-creator webhook secret matching, forged
+rejection).
 
 ### Photo posts (creator uploads)
 
@@ -240,25 +301,44 @@ shows the caption, media count and the one-time price
 — the client renders the blurred/locked card from that metadata.
 
 `POST /content/{post_id}/unlock` charges the one-time price through the
-payment abstraction (`PaymentProvider.charge_one_time`, same gateway as
-subscriptions) and records a `BroadcastUnlock` row — one per (subscriber,
-post), idempotent: repeating an already-paid unlock returns the existing row
-with `already_unlocked: true` and never charges twice. After the unlock the
-feed returns the full post (`unlocked: true`, media urls included) and the
-media endpoint serves the watermarked blob. The post's creator always has
-full access (the unlock endpoint rejects them with `409`).
+payment abstraction (`PaymentProvider.charge_one_time` — a one-time charge,
+**entirely separate from the monthly subscription charge**) and records a
+`PaidUnlock` row — one per (subscriber, post), idempotent: repeating an
+already-paid unlock returns the existing row with `already_unlocked: true`
+and never charges twice. After the unlock the feed returns the full post
+(`unlocked: true`, media urls included) and the media endpoint serves the
+watermarked blob. The post's creator always has full access (the unlock
+endpoint rejects them with `409`). A failed charge returns `402` and grants
+**nothing** — no `PaidUnlock` row is written.
+
+**Refunds revoke access.** The gateway's refund webhook (`charge.refunded` /
+`PAYMENT.CAPTURE.REFUNDED` / mock `payment.refunded`) is normalized to
+`payment.refunded` and reconciled by `BroadcastService.handle_refunded`
+(route: `/webhooks/{provider}`), which stamps `refunded_at` on the matching
+`PaidUnlock` — matched by external ref first (Stripe's `payment_intent`),
+then by the `subscriber_id`/`post_id` charge metadata (PayPal sends the
+capture id, not the order id we store). Once refunded the broadcast locks
+again in the feed and media (`403`), and the subscriber can **re-purchase**
+— the same row is reactivated in place with a fresh charge. Refund events are
+idempotent per provider event id (same `processed_webhook_event` ledger as
+subscriptions); a refund for an unknown charge is a no-op.
 
 Access rules:
 
 - anonymous → `401`; registered non-subscriber → `403`;
 - subscriber without payment → locked preview in the feed, `403` on media;
 - subscriber after unlock → full watermarked media (`Cache-Control: no-store`);
+- subscriber after a refund → locked again until re-purchase;
 - creator (owner) → full media without paying.
 
 Covered by `backend/tests/test_broadcast.py` — the unit lock/unlock state
-machine (charge recorded exactly once, failed charge grants nothing, regular
-posts rejected) plus the end-to-end lock → unlock → full-access integration
-flow across the feed, media and unlock endpoints.
+machine (charge recorded exactly once, failed charge grants nothing, refund
+revokes + re-purchase reactivates, refund matched by ref or metadata,
+idempotent refund redelivery) plus the end-to-end lock → unlock → full-access
+integration flow and the **success / failure / refund** acceptance scenarios
+for the one-time charge. Stripe's `charge.refunded` normalization is covered
+in `backend/tests/test_stripe_integration.py` and PayPal's
+`PAYMENT.CAPTURE.REFUNDED` in `backend/tests/test_webhook_renewal.py`.
 
 ### Stripe subscriptions
 
@@ -273,6 +353,108 @@ Stripe integration is covered by `backend/tests/test_stripe_integration.py`,
 which simulates the Stripe API with `httpx.MockTransport` (no network): the
 test-mode subscription flow, `invoice.paid` → `active`, and
 `invoice.payment_failed` → `past_due`.
+
+### PayPal subscriptions (sandbox & live)
+
+Set `PAYMENT_PROVIDER=paypal` with `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET`
+/ `PAYPAL_WEBHOOK_ID` from a PayPal REST app, and `PAYPAL_ENVIRONMENT`
+(`sandbox` — `api-m.sandbox.paypal.com` — or `live` — `api-m.paypal.com`).
+The provider speaks the **Billing Subscriptions API** (`httpx`, no SDK):
+OAuth2 client-credentials auth, hosted subscription approval links, cancel,
+and POST-back webhook verification.
+
+**Billing plan bootstrap** — PayPal requires the monthly billing plan to exist
+at the gateway before it accepts subscriptions. Create it once per environment:
+
+```bash
+docker compose exec api python -m app.payments.bootstrap_paypal
+# -> Created billing plan P-XXXXXXXXXX (status ACTIVE).
+# -> Set SUBSCRIPTION_TIER_PLAN_ID=P-XXXXXXXXXX and restart the API.
+```
+
+This creates the catalog product (unless `PAYPAL_PRODUCT_ID` is set) and an
+**ACTIVE fixed-price monthly plan** priced at `SUBSCRIPTION_TIER_PRICE_CENTS`;
+the printed plan id is what `SUBSCRIPTION_TIER_PLAN_ID` must hold (PayPal plan
+ids look like `P-...`). In production, create the plan in the live app and
+repeat with the live credentials.
+
+**Webhooks** — register `POST /api/webhooks/paypal` as the webhook URL in the
+PayPal app (sandbox or live) for `BILLING.SUBSCRIPTION.APPROVED` /
+`ACTIVATED` / `CANCELLED` / `SUSPENDED` and `PAYMENT.SALE.COMPLETED` /
+`DENIED`, and set `PAYPAL_WEBHOOK_ID` from that webhook. Signatures are
+verified by POSTing the event back to PayPal's verify endpoint.
+
+**Lifecycle** — subscribing returns the hosted **approve link** (the local row
+is `incomplete` until then); the buyer's approval fires `APPROVED`, which
+activates the subscription (checkout url cleared). Renewals reconcile **by
+`billing_agreement_id`** — the `PAYMENT.SALE.*` resource is the sale (its own
+id differs from the stored ref), so this is what keeps renewals matching the
+local row; `SALE.COMPLETED` → `active`, `SALE.DENIED` → `past_due` with the
+grace-period notification. PayPal events don't carry a billing period, so the
+provider approximates a 30-day cycle from the event's `create_time` to keep
+period-based access expiry working.
+
+**Integration tests** — `backend/tests/test_paypal_integration.py` simulates
+the sandbox Billing Subscriptions API with `httpx.MockTransport` (no network):
+plan bootstrap, subscribe → pending row + approve link, `APPROVED` → `active`,
+renewal success/failure reconciled by `billing_agreement_id` (regression-tested),
+idempotent redelivery, cancel, and verification failures. A **real-sandbox**
+test (`test_paypal_sandbox_subscribe_flow`) runs only when `PAYPAL_CLIENT_ID` /
+`PAYPAL_CLIENT_SECRET` / `PAYPAL_WEBHOOK_ID` are set **and**
+`RUN_PAYPAL_SANDBOX=1`: it bootstraps a plan and subscribes against the real
+sandbox, printing the approve link (the buyer's approval is a hosted,
+human step — webhook reconciliation is covered by the simulated tests).
+
+### Wompi (El Salvador) subscriptions
+
+Set `PAYMENT_PROVIDER=wompi` with `WOMPI_CLIENT_ID` / `WOMPI_CLIENT_SECRET`
+from a Wompi Commerce applicativo (El Salvador). Wompi SV authenticates with
+**OAuth2 client credentials** (not the public/private keys of Wompi Colombia)
+and is integrated through the `pywompi` package: the provider uses its generic
+authenticated `request(method, path, json=)` for the endpoints below and its
+`parse_event()` for webhook validation. The environment (sandbox vs
+production) is a property of the applicativo — the credentials you configure —
+not a URL switch; `WOMPI_API_BASE_URL` / `WOMPI_TOKEN_URL` overrides exist for
+test accounts.
+
+**Recurring subscriptions (with 3DS)** — `create_subscription` creates a
+**per-subscription recurring payment link** (`POST /EnlacePagoRecurrente`,
+`nombre`, `monto` = `SUBSCRIPTION_TIER_PRICE_CENTS`, `diaDePago` =
+`WOMPI_DIA_DE_PAGO`). The subscriber completes the hosted page (3DS is
+handled there) and is charged monthly on `diaDePago`; the link id doubles as
+our `external_ref` and canceling = disabling that link (`POST
+/EnlacePagoRecurrente/{id}`).
+
+**Webhooks (`wompi_hash` signature)** — Wompi signs every webhook with the
+`wompi_hash` header: the HMAC-SHA256 of the **raw body** (byte for byte)
+keyed with your API Secret. `POST /api/webhooks/wompi` validates via
+`pywompi.parse_event` before touching anything; a bad signature is a `400`.
+Transaction events carry `data.transaccion.estado` (`APROBADA` / `RECHAZADA`):
+`APROBADA` activates the pending subscription — and renewals reconcile — by
+matching the **payer email** (the events carry the suscripcion ref, not the
+link id; `external_ref` deliberately stays the link id so cancellation keeps
+targeting the right link). A `RECHAZADA` on an active subscription moves it to
+`past_due` (grace-period notification).
+
+**One-time charges** — `charge_one_time` uses
+`POST /TransaccionCompra/TokenizadaSin3Ds` with a card token from client-side
+tokenization (the Wompi JS SDK with your public key; pass it as
+`payment_method_token`). Cards that require 3DS go through
+`charge_one_time_3ds` (`POST /TransaccionCompra/3Ds`), which returns
+`urlCompletarPago3Ds` to redirect the customer to; the outcome arrives by
+webhook (`WOMPI_3DS_REDIRECT_URL` is the return URL).
+
+Covered by `backend/tests/test_wompi_integration.py`, which fakes the sandbox
+API through `pywompi.WompiClient(http_client=httpx.MockTransport(...))` (no
+network): subscribe → pending row + hosted link, signature validation
+(valid/forged/unknown-state), `APROBADA` → active + ref adoption,
+renewals, `RECHAZADA` → `past_due`, cancel, tokenized/3DS one-time charges,
+and config guards. A real-sandbox test (`test_wompi_sandbox_subscribe_flow`)
+runs when `WOMPI_CLIENT_ID` / `WOMPI_CLIENT_SECRET` are set **and**
+`RUN_WOMPI_SANDBOX=1`.
+
+> **License note:** `pywompi` is GPL-3.0-or-later — keep that in mind if you
+distribute this project as a closed product.
 
 ### Webhook handling — renewal, failure & idempotency
 

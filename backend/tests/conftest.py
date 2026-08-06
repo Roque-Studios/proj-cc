@@ -25,8 +25,9 @@ from app.config import settings
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
-    BroadcastUnlock,
+    CreatorGatewayConfig,
     CreatorProfile,
+    PaidUnlock,
     Post,
     PostMedia,
     ProcessedWebhookEvent,
@@ -71,10 +72,11 @@ def _clean_db():
     yield
     with _TestSession() as db:
         db.query(ProcessedWebhookEvent).delete()
-        db.query(BroadcastUnlock).delete()  # FKs to post + user
+        db.query(PaidUnlock).delete()  # FKs to post + user
         db.query(PostMedia).delete()
         db.query(Post).delete()
         db.query(Subscription).delete()
+        db.query(CreatorGatewayConfig).delete()  # FK to user
         db.query(CreatorProfile).delete()
         db.query(User).delete()
         db.commit()

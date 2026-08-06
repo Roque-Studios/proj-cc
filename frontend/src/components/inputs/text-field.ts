@@ -6,6 +6,9 @@ export class AeroTextField extends LitElement {
   @property({ type: String }) value = "";
   @property({ type: String }) placeholder = "";
   @property({ type: String }) label = "";
+  // Input type ("text", "password", ...) — defaults to text so existing
+  // usages are unchanged.
+  @property({ type: String }) type = "text";
   @property({ type: Boolean }) disabled = false;
   @property({ type: Boolean }) error = false;
 
@@ -111,7 +114,7 @@ export class AeroTextField extends LitElement {
         <div class="input-wrapper">
           <input
             class="aero-input ${this.error ? "error" : ""}"
-            type="text"
+            type="${this.type}"
             .value="${this.value}"
             placeholder="${this.placeholder}"
             ?disabled="${this.disabled}"

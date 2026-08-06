@@ -12,7 +12,13 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from app.models import Subscription, SubscriptionStatus, User, UserRole
+from app.models import (
+    CreatorGatewayConfig,
+    Subscription,
+    SubscriptionStatus,
+    User,
+    UserRole,
+)
 from app.payments.mock import MockPaymentProvider
 from app.services.subscriptions import SubscriptionService
 
@@ -273,6 +279,14 @@ def test_full_flow_cancel_then_expire(client, db_session):
     with db_session as db:
         creator = _creator(db)
         creator_id = creator.id
+        # The creator enables the zero-credential mock gateway so the
+        # endpoint's strictly-per-creator resolution accepts the subscribe.
+        db.add(
+            CreatorGatewayConfig(
+                creator_id=creator.id, gateway="mock", enabled=True, config={}
+            )
+        )
+        db.commit()
 
     # Subscribe via the endpoint (mock provider -> incomplete).
     resp = client.post("/subscribe", json={"creator_id": creator_id}, headers=headers)

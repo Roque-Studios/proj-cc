@@ -48,6 +48,15 @@ _STATUS_MAP = {
     "expired": SubscriptionStatus.expired,
 }
 
+# Statuses an email-fallback webhook match may still reconcile (a canceled or
+# expired row must never be resurrected by a late event).
+_NON_TERMINAL = (
+    SubscriptionStatus.active,
+    SubscriptionStatus.trialing,
+    SubscriptionStatus.past_due,
+    SubscriptionStatus.incomplete,
+)
+
 
 class SubscriptionService:
     def __init__(self, db: Session, provider: PaymentProvider | None = None) -> None:
@@ -210,9 +219,17 @@ class SubscriptionService:
         return len(rows)
 
     def handle_webhook(
-        self, body: bytes, headers: Mapping[str, str]
+        self,
+        body: bytes,
+        headers: Mapping[str, str],
+        *,
+        event: WebhookEvent | None = None,
     ) -> WebhookEvent:
         """Verify a webhook and reconcile it with the local subscription.
+
+        ``event`` may carry a **pre-verified** ``WebhookEvent`` (the webhook
+        router verifies once and dispatches by type); when omitted the body is
+        verified here, so direct callers are unchanged.
 
         Processing is idempotent per provider event: an event id already in the
         ``processed_webhook_event`` ledger is a duplicate delivery (provider
@@ -221,7 +238,8 @@ class SubscriptionService:
         once per episode. Raises ``WebhookVerificationError`` for bad
         signatures.
         """
-        event = self.provider.verify_webhook(body, headers)
+        if event is None:
+            event = self.provider.verify_webhook(body, headers)
         if event.external_ref is None:
             return event
 
@@ -254,6 +272,27 @@ class SubscriptionService:
                 if subscription is not None and event.external_ref != session_id:
                     subscription.external_ref = event.external_ref
                     ref_adopted = True
+        if subscription is None and event.customer_email:
+            # Gateways whose recurring-charge events don't reference the ref we
+            # stored (e.g. Wompi recurring-link charges carry the suscripcion
+            # id, not the link id) match by the payer email instead: the user's
+            # latest non-terminal row for this provider. The event ref is NOT
+            # adopted — ``external_ref`` stays the gateway resource we created
+            # (the Wompi link id) so cancellation still targets the right link.
+            # Safe: only signature-verified events reach this point. Limitation
+            # (accepted, solo platform): with several non-terminal rows for one
+            # email the latest by id is chosen.
+            user = self.db.scalar(
+                select(User).where(User.email == event.customer_email)
+            )
+            if user is not None:
+                subscription = self.db.scalar(
+                    select(Subscription).where(
+                        Subscription.subscriber_id == user.id,
+                        Subscription.payment_provider == event.provider,
+                        Subscription.status.in_(_NON_TERMINAL),
+                    ).order_by(Subscription.id.desc())
+                )
         if subscription is None:
             # Unknown subscription (e.g. webhook arriving before our row, or a
             # different environment) — nothing to reconcile, and deliberately

@@ -52,7 +52,25 @@ class Settings(BaseSettings):
     PAYPAL_CLIENT_ID: str = ""
     PAYPAL_CLIENT_SECRET: str = ""
     PAYPAL_WEBHOOK_ID: str = ""
+    # sandbox | live — selects the PayPal REST API base URL
     PAYPAL_ENVIRONMENT: str = "sandbox"
+    # Optional existing catalog product (PROD-...) for billing plans; when
+    # empty the bootstrap script (app.payments.bootstrap_paypal) creates one.
+    PAYPAL_PRODUCT_ID: str = ""
+    # Wompi (El Salvador) credentials — required when PAYMENT_PROVIDER=wompi.
+    # Wompi SV authenticates with OAuth2 client credentials (App ID / API
+    # Secret). The environment is per-app (each applicativo is marked
+    # productivo or not in the panel) rather than a URL switch; the URLs are
+    # overridable for test accounts.
+    WOMPI_CLIENT_ID: str = ""
+    WOMPI_CLIENT_SECRET: str = ""
+    WOMPI_ENVIRONMENT: str = "sandbox"
+    WOMPI_API_BASE_URL: str = "https://api.wompi.sv"
+    WOMPI_TOKEN_URL: str = "https://id.wompi.sv/connect/token"
+    # Recurring subscriptions charge the subscriber on this day of each month.
+    WOMPI_DIA_DE_PAGO: int = 1
+    # Where the customer returns after completing a 3DS one-time charge.
+    WOMPI_3DS_REDIRECT_URL: str = ""
 
     # Single subscription tier (monthly). The plan id is the gateway price id
     # (e.g. a Stripe recurring price); the price is informational for the API.

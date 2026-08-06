@@ -56,6 +56,9 @@ _EVENT_MAP = {
     "invoice.paid": WebhookEventType.payment_succeeded,
     "invoice.payment_succeeded": WebhookEventType.payment_succeeded,
     "invoice.payment_failed": WebhookEventType.payment_failed,
+    # Fires when a one-time charge (Payment Intent) is refunded — the object is
+    # the charge, and its ``payment_intent`` is the ref we stored on the unlock.
+    "charge.refunded": WebhookEventType.payment_refunded,
 }
 
 
@@ -207,7 +210,15 @@ class StripePaymentProvider(PaymentProvider):
         # service can adopt the subscription id on reconciliation.
         if payload.get("type") == "checkout.session.completed":
             metadata["checkout_session_id"] = obj.get("id", "")
+        # For ``charge.refunded`` the object is the charge: prefer its
+        # ``payment_intent`` (the ref our one-time charges store) over the
+        # charge id. This preference is gated to refund events on purpose —
+        # real Stripe *invoice* objects also carry a ``payment_intent`` field,
+        # and for ``invoice.paid``/``invoice.payment_failed`` the reconcilable
+        # ref must stay the subscription id (``pi_...`` would miss the lookup).
         external_ref = obj.get("subscription") or obj.get("id")
+        if payload.get("type") == "charge.refunded":
+            external_ref = obj.get("payment_intent") or external_ref
         # Invoice events carry the billing period as unix timestamps.
         period_start = _timestamp_to_dt(obj.get("period_start"))
         period_end = _timestamp_to_dt(obj.get("period_end"))

@@ -23,7 +23,7 @@ import pytest
 
 from app.models import Subscription, SubscriptionStatus, User, UserRole
 from app.payments.stripe import StripePaymentProvider
-from app.payments import WebhookVerificationError
+from app.payments import WebhookEventType, WebhookVerificationError
 from app.services.subscriptions import SubscriptionService
 
 WEBHOOK_SECRET = "whsec_integration_test"
@@ -250,7 +250,9 @@ def test_stripe_invoice_paid_webhook_sets_active(db_session):
         assert subscription.status == SubscriptionStatus.active
 
         # invoice.paid -> status stays active (first renewal succeeds) and the
-        # billing period is recorded.
+        # billing period is recorded. Real Stripe invoices carry a
+        # ``payment_intent``; the reconcilable ref must stay the subscription
+        # id (the payment_intent preference is refund-events-only).
         period_start = int(time.time()) - 86400
         period_end = int(time.time()) + 30 * 86400
         body, headers = _signed_webhook(
@@ -261,6 +263,7 @@ def test_stripe_invoice_paid_webhook_sets_active(db_session):
                     "object": {
                         "id": "in_1",
                         "subscription": "sub_test_1",
+                        "payment_intent": "pi_invoice_1",
                         "status": "paid",
                         "period_start": period_start,
                         "period_end": period_end,
@@ -326,7 +329,8 @@ def test_stripe_invoice_payment_failed_webhook_sets_past_due(db_session):
         db.refresh(subscription)
         assert subscription.status == SubscriptionStatus.active
 
-        # invoice.payment_failed -> past_due (renewal failed).
+        # invoice.payment_failed -> past_due (renewal failed). Real invoices
+        # carry ``payment_intent``; the ref must stay the subscription id.
         body, headers = _signed_webhook(
             provider,
             {
@@ -335,6 +339,7 @@ def test_stripe_invoice_payment_failed_webhook_sets_past_due(db_session):
                     "object": {
                         "id": "in_2",
                         "subscription": "sub_test_1",
+                        "payment_intent": "pi_invoice_2",
                         "status": "open",
                     }
                 },
@@ -372,6 +377,41 @@ def test_stripe_resubscribe_reactivates_canceled_row(db_session):
         assert renewed.status == SubscriptionStatus.incomplete
         assert renewed.external_ref != first_ref
         assert db.query(Subscription).count() == 1
+
+
+def test_stripe_charge_refunded_webhook_maps_to_payment_refunded(db_session):
+    """``charge.refunded`` normalizes to ``payment.refunded`` with the PI ref.
+
+    The one-time unlock stores the Payment Intent id (``pi_...``) as its
+    external ref; the refund event's object is the *charge*, so the provider
+    surfaces ``payment_intent`` as the external ref and passes the charge
+    metadata (which Stripe copies from the intent) for the metadata fallback.
+    """
+    fake_api = FakeStripeAPI()
+    provider = _stripe_provider(fake_api)
+    body, headers = _signed_webhook(
+        provider,
+        {
+            "type": "charge.refunded",
+            "id": "evt_charge_refunded_1",
+            "data": {
+                "object": {
+                    "id": "ch_1",
+                    "payment_intent": "pi_1",
+                    "status": "refunded",
+                    "metadata": {
+                        "subscriber_id": "7",
+                        "post_id": "42",
+                    },
+                }
+            },
+        },
+    )
+    event = provider.verify_webhook(body, headers)
+    assert event.event_type == WebhookEventType.payment_refunded
+    assert event.external_ref == "pi_1"  # the ref our PaidUnlock stores
+    assert event.id == "evt_charge_refunded_1"
+    assert event.metadata["post_id"] == "42"
 
 
 def test_stripe_webhook_forged_signature_rejected(db_session):

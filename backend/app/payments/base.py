@@ -39,6 +39,7 @@ class WebhookEventType(enum.Enum):
     subscription_canceled = "subscription.canceled"
     payment_succeeded = "payment.succeeded"
     payment_failed = "payment.failed"
+    payment_refunded = "payment.refunded"
 
 
 @dataclass
@@ -79,6 +80,10 @@ class ChargeRequest:
     currency: str = "usd"
     description: str | None = None
     metadata: dict = field(default_factory=dict)
+    # A tokenized payment method (e.g. a Wompi card token from client-side
+    # tokenization). Optional — gateways with hosted checkout (Stripe/PayPal
+    # one-time links) don't need it; Wompi's tokenized charge does.
+    payment_method_token: str | None = None
 
 
 @dataclass
@@ -115,6 +120,10 @@ class WebhookEvent:
     subscription_status: str | None = None
     period_start: datetime | None = None
     period_end: datetime | None = None
+    # The payer's email when the event carries it. Used as a reconciliation
+    # fallback for gateways whose events don't reference our stored ref
+    # directly (e.g. Wompi recurring-link charges).
+    customer_email: str | None = None
     metadata: dict = field(default_factory=dict)
     raw: dict = field(default_factory=dict)
 

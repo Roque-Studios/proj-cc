@@ -394,6 +394,24 @@ def test_factory_switches_to_paypal_with_credentials(monkeypatch):
     assert isinstance(provider, PayPalPaymentProvider)
 
 
+def test_factory_switches_to_wompi_with_credentials(monkeypatch):
+    from app.payments.wompi import WompiPaymentProvider
+
+    monkeypatch.setattr(settings, "PAYMENT_PROVIDER", "wompi")
+    monkeypatch.setattr(settings, "WOMPI_CLIENT_ID", "app_1")
+    monkeypatch.setattr(settings, "WOMPI_CLIENT_SECRET", "secret_1")
+    provider = get_payment_provider(settings)
+    assert isinstance(provider, WompiPaymentProvider)
+
+
+def test_factory_fails_fast_missing_wompi_credentials(monkeypatch):
+    monkeypatch.setattr(settings, "PAYMENT_PROVIDER", "wompi")
+    monkeypatch.setattr(settings, "WOMPI_CLIENT_ID", "")
+    monkeypatch.setattr(settings, "WOMPI_CLIENT_SECRET", "secret_1")
+    with pytest.raises(ProviderConfigurationError):
+        get_payment_provider(settings)
+
+
 def test_factory_rejects_unknown_provider(monkeypatch):
     monkeypatch.setattr(settings, "PAYMENT_PROVIDER", "bitcoin-cash")
     with pytest.raises(ProviderConfigurationError):

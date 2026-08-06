@@ -256,6 +256,10 @@ def _stripe_invoice_paid() -> dict:
             "object": {
                 "id": "in_1",
                 "subscription": "sub_x",
+                # Real Stripe invoices carry payment_intent; the reconcilable
+                # ref must stay the subscription id (ref preference is
+                # refund-events-only), so keep it in the fixture.
+                "payment_intent": "pi_invoice_1",
                 "status": "paid",
                 "period_start": int((NOW - timedelta(days=30)).timestamp()),
                 "period_end": int((NOW + timedelta(days=1)).timestamp()),
@@ -387,7 +391,18 @@ def _paypal_provider() -> "PayPalPaymentProvider":
 
 
 def _paypal_event(event_type: str, status: str | None, event_id: str) -> bytes:
-    resource = {"id": "sub_pp_1"}
+    # Realistic resource per event family: subscription lifecycle events carry
+    # the subscription as the resource; payment (sale) events carry the *sale*
+    # (its own id + billing_agreement_id pointing at the subscription) plus a
+    # create_time the provider turns into the approximate billing period.
+    if event_type.startswith("PAYMENT.SALE"):
+        resource = {
+            "id": "8PT-sale-1",
+            "billing_agreement_id": "sub_pp_1",
+            "create_time": NOW.isoformat(),
+        }
+    else:
+        resource = {"id": "sub_pp_1"}
     if status:
         resource["status"] = status
     return json.dumps(
@@ -444,6 +459,35 @@ def test_paypal_renewal_success_and_failure_mocked(db_session, monkeypatch):
             if url.endswith("/v1/notifications/verify-webhook-signature")
         ]
         assert len(verify_calls) == 3
+
+
+def test_paypal_capture_refunded_maps_to_payment_refunded(db_session):
+    """A one-time capture refund normalizes to payment.refunded with metadata.
+
+    The resource is the *capture* (its id differs from the order id we stored),
+    so matching relies on the ``custom_id`` metadata the provider now passes
+    through — the service falls back to it when the ref lookup misses.
+    """
+    from app.payments.base import WebhookEventType
+
+    provider = _paypal_provider()
+    body = json.dumps(
+        {
+            "id": "WH-refund-1",
+            "event_type": "PAYMENT.CAPTURE.REFUNDED",
+            "resource": {
+                "id": "cap_1",
+                "custom_id": json.dumps(
+                    {"subscriber_id": "3", "post_id": "9"}
+                ),
+            },
+            "resource_type": "capture",
+        }
+    ).encode()
+    event = provider.verify_webhook(body, {})
+    assert event.event_type == WebhookEventType.payment_refunded
+    assert event.external_ref == "cap_1"
+    assert event.metadata == {"subscriber_id": "3", "post_id": "9"}
 
 
 def test_paypal_verification_failure_rejected(db_session):

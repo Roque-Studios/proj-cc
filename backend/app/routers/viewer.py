@@ -15,9 +15,11 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..access import ViewerContext, resolve_viewer_access
 from ..database import get_db
+from ..gateways import GATEWAYS
 from ..models import Post, User, UserRole
-from ..schemas import FeedResponse, build_post_out
+from ..schemas import CheckoutGatewayOut, FeedResponse, build_post_out
 from ..services.broadcasts import BroadcastService
+from ..services.gateways import enabled_configured_gateways
 
 router = APIRouter(prefix="/creators", tags=["viewer"])
 
@@ -123,3 +125,26 @@ def creator_feed(
         total=total,
         has_more=page * page_size < total,
     )
+
+
+@router.get("/{creator_id}/gateways", response_model=list[CheckoutGatewayOut])
+def creator_checkout_gateways(
+    creator_id: int,
+    db: Session = Depends(get_db),
+):
+    """Gateways a subscriber can pay with for this creator (public).
+
+    Returns **only** the creator's enabled gateways with a complete config —
+    disabled, incomplete, or unknown gateways never appear, so subscriber
+    checkout only ever shows what the creator actually accepts.
+    """
+    creator = db.get(User, creator_id)
+    if creator is None or creator.role != UserRole.creator or not creator.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Creator not found",
+        )
+    return [
+        CheckoutGatewayOut(gateway=gateway, label=GATEWAYS[gateway].label)
+        for gateway, _row in enabled_configured_gateways(db, creator_id)
+    ]

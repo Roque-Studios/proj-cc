@@ -94,9 +94,15 @@ class CreatorProfileUpdate(BaseModel):
 
 
 class SubscribeRequest(BaseModel):
-    """Start a subscription to a creator at the single defined monthly tier."""
+    """Start a subscription to a creator at the monthly tier.
+
+    ``provider`` optionally picks which of the creator's enabled gateways to
+    pay with (stripe/paypal/wompi/mock); when omitted, a single enabled +
+    configured gateway is used (multiple or none -> 400).
+    """
 
     creator_id: int
+    provider: str | None = Field(default=None, max_length=50)
     success_url: str | None = None
     cancel_url: str | None = None
 
@@ -194,14 +200,19 @@ def build_post_out(
     )
 
 
-class BroadcastUnlockOut(BaseModel):
-    """A subscriber's one-time paid unlock of a paid broadcast."""
+class PaidUnlockOut(BaseModel):
+    """A subscriber's one-time paid unlock of a paid broadcast.
+
+    ``refunded_at`` is non-null once the gateway refunded the charge (access
+    revoked until the subscriber re-purchases).
+    """
 
     id: int
     subscriber_id: int
     post_id: int
     payment_provider: str | None
     external_ref: str | None
+    refunded_at: datetime | None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -217,7 +228,7 @@ class UnlockResponse(BaseModel):
     post_id: int
     broadcast_price_cents: int
     already_unlocked: bool
-    unlock: BroadcastUnlockOut
+    unlock: PaidUnlockOut
 
 
 class FeedResponse(BaseModel):
@@ -233,6 +244,55 @@ class FeedResponse(BaseModel):
     page_size: int
     total: int
     has_more: bool
+
+
+class GatewayFieldOut(BaseModel):
+    """One credential field of a creator's gateway settings form.
+
+    ``configured`` reports whether the creator has a stored value for this
+    field; secret values themselves are **never** returned (only the boolean),
+    so the settings UI can render forms without ever echoing keys back.
+    """
+
+    name: str
+    label: str
+    required: bool
+    secret: bool
+    placeholder: str
+    options: list[str]
+    configured: bool
+
+
+class GatewaySettingsOut(BaseModel):
+    """A creator's per-gateway settings (no secret values)."""
+
+    gateway: str
+    label: str
+    description: str
+    enabled: bool
+    # True when every required field is configured (the gateway could be enabled).
+    configured: bool
+    fields: list[GatewayFieldOut]
+
+
+class GatewaySettingsUpdate(BaseModel):
+    """Update one gateway's settings.
+
+    ``enabled`` toggles the gateway for subscriber checkout (rejected when the
+    required config is incomplete). ``config`` merges over the stored values —
+    empty strings keep the existing stored value, so updates never wipe
+    secrets the client cannot see.
+    """
+
+    enabled: bool | None = None
+    config: dict[str, str | int] | None = None
+
+
+class CheckoutGatewayOut(BaseModel):
+    """One gateway a subscriber can pay with (creator enabled + configured)."""
+
+    gateway: str
+    label: str
 
 
 class WatermarkTraceOut(BaseModel):
