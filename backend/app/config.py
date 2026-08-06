@@ -68,6 +68,23 @@ class Settings(BaseSettings):
     SMTP_FROM: str = ""
     SMTP_TLS: bool = True
 
+    # Photo-post media uploads (validated images). Original (unwatermarked)
+    # uploads live in a PRIVATE store — never served directly to clients; only
+    # internal service code can read them. Serving watermarks originals on the
+    # fly per viewer (see app.watermark), so no served copy is persisted.
+    ORIGINAL_MEDIA_STORAGE_PATH: str = "/data/media/original"
+    MAX_MEDIA_SIZE_BYTES: int = 10 * 1024 * 1024  # 10 MB per file
+    ALLOWED_MEDIA_EXTENSIONS: str = ".jpg,.jpeg,.png,.webp,.gif"
+
+    @property
+    def allowed_media_extensions(self) -> set[str]:
+        """Parsed set of allowed upload extensions (lowercased)."""
+        return {
+            e.strip().lower()
+            for e in self.ALLOWED_MEDIA_EXTENSIONS.split(",")
+            if e.strip()
+        }
+
     @property
     def cors_origins(self) -> list[str]:
         """Parse ALLOWED_ORIGINS (comma-separated) into a list."""

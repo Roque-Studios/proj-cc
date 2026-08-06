@@ -178,6 +178,126 @@ class ProcessedWebhookEvent(Base):
     )
 
 
+class Post(Base):
+    """A creator's post (photo-post for now), visible to followers only.
+
+    Access gating happens at the feed/read layer (see the viewer access
+    resolver); the model itself just scopes posts to their creator.
+
+    A post with ``broadcast_price_cents`` set is a **paid broadcast**: it goes
+    to all subscribers as a locked preview, and each subscriber needs a one-time
+    payment (``BroadcastUnlock``) for full media access.
+    """
+
+    __tablename__ = "post"
+
+    id = Column(Integer, primary_key=True, index=True)
+    creator_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    caption = Column(Text, nullable=True)
+    # One-time unlock price in cents; NULL = a regular (free) post.
+    broadcast_price_cents = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    media = relationship(
+        "PostMedia",
+        back_populates="post",
+        cascade="all, delete-orphan",
+        order_by="PostMedia.id",
+    )
+    unlocks = relationship(
+        "BroadcastUnlock",
+        back_populates="post",
+        cascade="all, delete-orphan",
+        # FK has ON DELETE CASCADE: post deletion is delegated to the DB.
+        passive_deletes=True,
+    )
+
+
+class PostMedia(Base):
+    """A media file attached to a post (validated image upload).
+
+    ``storage_key`` is an unguessable uuid + extension and names the private
+    original in the storage layer; it is **never exposed in a public URL**.
+    Clients reference media through the auth-gated, watermarked
+    ``/content/{post_id}/media?media_id={id}`` endpoint instead (see
+    ``app.routers.content``), so the unguessable key can't be used to fetch
+    content without a valid subscription.
+    """
+
+    __tablename__ = "post_media"
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(
+        Integer,
+        ForeignKey("post.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    media_type = Column(String(50), nullable=False)  # e.g. image/jpeg
+    storage_key = Column(String(255), unique=True, index=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    post = relationship("Post", back_populates="media")
+
+    @property
+    def media_url(self) -> str:
+        """Public URL for this media file (auth + watermark applied on fetch).
+
+        ``<img>`` tags can pass the access token via ``?token=``. The storage
+        key itself is never part of any URL.
+        """
+        return f"/content/{self.post_id}/media?media_id={self.id}"
+
+
+class BroadcastUnlock(Base):
+    """A subscriber's one-time paid unlock of a paid broadcast (post).
+
+    One row per (subscriber, broadcast): unlocking is a one-time purchase, so
+    the unique pair is enforced. The payment is a one-time charge through the
+    payment abstraction (``PaymentProvider.charge_one_time``); the provider
+    ref is kept for reconciliation.
+    """
+
+    __tablename__ = "broadcast_unlock"
+    __table_args__ = (
+        UniqueConstraint(
+            "subscriber_id",
+            "post_id",
+            name="uq_broadcast_unlock_subscriber_post",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    subscriber_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    post_id = Column(
+        Integer,
+        ForeignKey("post.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    payment_provider = Column(String(50), nullable=True)
+    external_ref = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    post = relationship("Post", back_populates="unlocks")
+
+
 class CreatorProfile(Base):
     """Creator profile extension (one-to-one with User).
 

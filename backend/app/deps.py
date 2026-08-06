@@ -62,3 +62,19 @@ def require_creator(user: User = Depends(get_current_user)) -> User:
             detail="Creator access required",
         )
     return user
+
+
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    """Admin access gate.
+
+    On this single-operator platform the **creator role is the admin role**
+    (product decision): the platform owner is a creator, and admin tooling
+    (e.g. watermark traceability) is gated behind it. No separate admin role
+    exists.
+    """
+    if user.role != UserRole.creator:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    return user

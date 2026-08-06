@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import itertools
 import json
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Mapping
 
@@ -27,11 +27,6 @@ from .base import (
     WebhookEventType,
     WebhookVerificationError,
 )
-
-# Module-level counter so refs stay globally unique across provider instances
-# (a provider is instantiated per request/webhook in dev, and real gateways
-# never reuse ids — uniqueness is what makes reconciliation by ref unambiguous).
-_GLOBAL_REF_SEQ = itertools.count(1)
 
 _MOCK_EVENT_MAP = {
     "subscription.created": WebhookEventType.subscription_created,
@@ -55,7 +50,7 @@ class MockPaymentProvider(PaymentProvider):
         self.webhook_secret = webhook_secret
         self.subscriptions: dict[str, dict] = {}
         self.charges: dict[str, dict] = {}
-        self._seq = next(_GLOBAL_REF_SEQ)
+        self._seq = 0
 
     # ------------------------------------------------------------------ #
     # Interface
@@ -70,7 +65,10 @@ class MockPaymentProvider(PaymentProvider):
 
     def create_subscription(self, intent: SubscriptionIntent) -> SubscriptionResult:
         self._seq += 1
-        external_ref = f"sub_mock_{self._seq}"
+        # uuid fragment guarantees uniqueness across worker processes (each
+        # gunicorn worker has its own in-memory counter), so refs never collide
+        # under ``uq_subscription_provider_ref``.
+        external_ref = f"sub_mock_{self._seq}_{uuid.uuid4().hex[:8]}"
         now = datetime.now(timezone.utc)
         self.subscriptions[external_ref] = {
             "external_ref": external_ref,

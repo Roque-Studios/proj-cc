@@ -130,3 +130,127 @@ class SubscribeResponse(BaseModel):
     subscription: SubscriptionOut
     checkout_url: str | None
     status: str
+
+
+class PostMediaOut(BaseModel):
+    id: int
+    media_type: str
+    # Null when the media is withheld (teaser for non-followers, locked paid
+    # broadcast preview): the url is withheld so the feed never leaks media
+    # links to viewers who can't access them.
+    media_url: str | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PostOut(BaseModel):
+    id: int
+    creator_id: int
+    caption: str | None
+    # Non-null => this post is a paid broadcast; the price is the one-time
+    # unlock amount in cents.
+    broadcast_price_cents: int | None = None
+    # The requesting viewer's unlock state: None for regular posts, True once
+    # the viewer paid (or owns the post), False while the preview is locked.
+    unlocked: bool | None = None
+    media: list[PostMediaOut]
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+def build_post_out(
+    post,
+    *,
+    unlocked: bool | None,
+    include_media_urls: bool,
+) -> PostOut:
+    """Build the public post shape for a specific viewer.
+
+    ``include_media_urls=False`` (non-follower teaser / locked broadcast
+    preview) withholds every media url while keeping the media *metadata*
+    (count, types); ``unlocked`` reflects the viewer's access to a paid
+    broadcast (``None`` when the post isn't one).
+    """
+    return PostOut(
+        id=post.id,
+        creator_id=post.creator_id,
+        caption=post.caption,
+        broadcast_price_cents=post.broadcast_price_cents,
+        unlocked=unlocked,
+        media=[
+            PostMediaOut(
+                id=media.id,
+                media_type=media.media_type,
+                media_url=media.media_url if include_media_urls else None,
+                created_at=media.created_at,
+            )
+            for media in post.media
+        ],
+        created_at=post.created_at,
+        updated_at=post.updated_at,
+    )
+
+
+class BroadcastUnlockOut(BaseModel):
+    """A subscriber's one-time paid unlock of a paid broadcast."""
+
+    id: int
+    subscriber_id: int
+    post_id: int
+    payment_provider: str | None
+    external_ref: str | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class UnlockResponse(BaseModel):
+    """Result of unlocking a paid broadcast.
+
+    ``already_unlocked`` is True on an idempotent repeat of a previous unlock
+    (no second charge); the ``unlock`` row is the same either way.
+    """
+
+    post_id: int
+    broadcast_price_cents: int
+    already_unlocked: bool
+    unlock: BroadcastUnlockOut
+
+
+class FeedResponse(BaseModel):
+    """Paginated feed of a creator's posts.
+
+    ``teaser=True`` (non-follower) withholds media urls; ``teaser=False``
+    (active follower) returns the full posts.
+    """
+
+    teaser: bool
+    posts: list[PostOut]
+    page: int
+    page_size: int
+    total: int
+    has_more: bool
+
+
+class WatermarkTraceOut(BaseModel):
+    """Result of decoding a watermark text line (admin abuse-investigation tool).
+
+    ``user_id`` is the viewer the watermark was rendered for; ``post_id`` the
+    post it was rendered from (``None`` for legacy watermarks or when the post
+    hash matches no known post). ``fetched_at`` is the capture timestamp the
+    watermark carried (naive UTC). ``user_matches``/``post_matches`` report how
+    many ids matched the truncated hash (1 normally; more = hash collision).
+    """
+
+    viewer_hash: str
+    post_hash: str | None
+    fetched_at: datetime | None
+    user_id: int | None
+    user_email: str | None
+    post_id: int | None
+    post_caption: str | None
+    user_matches: int
+    post_matches: int

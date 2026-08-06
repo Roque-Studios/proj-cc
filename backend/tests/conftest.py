@@ -19,10 +19,21 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app import cache as cache_module
 from app import token_store
+from app.config import settings
 from app.database import Base, get_db
 from app.main import app
-from app.models import CreatorProfile, ProcessedWebhookEvent, Subscription, User
+from app.models import (
+    BroadcastUnlock,
+    CreatorProfile,
+    Post,
+    PostMedia,
+    ProcessedWebhookEvent,
+    Subscription,
+    User,
+)
+from tests.fake_redis import FakeRedis
 
 # Token revocation uses an in-memory denylist (no Redis needed in tests).
 token_store.reset_store_for_tests()
@@ -60,10 +71,36 @@ def _clean_db():
     yield
     with _TestSession() as db:
         db.query(ProcessedWebhookEvent).delete()
+        db.query(BroadcastUnlock).delete()  # FKs to post + user
+        db.query(PostMedia).delete()
+        db.query(Post).delete()
         db.query(Subscription).delete()
         db.query(CreatorProfile).delete()
         db.query(User).delete()
         db.commit()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_media_storage(tmp_path, monkeypatch):
+    """Uploaded originals land in a per-test temp dir, never the real volume."""
+    monkeypatch.setattr(
+        settings, "ORIGINAL_MEDIA_STORAGE_PATH", str(tmp_path / "media" / "original")
+    )
+
+
+@pytest.fixture(autouse=True)
+def _fake_watermark_cache(monkeypatch):
+    """Watermark cache runs on an in-memory fake (no Redis needed in tests).
+
+    ``app.cache._get_client`` returns the module-level ``_client`` once set, so
+    installing a fresh ``FakeRedis`` per test fully isolates the cache —
+    including TTL expiry, which the fake implements with real wall-clock time.
+    """
+    fake = FakeRedis()
+    monkeypatch.setattr(cache_module, "_client", fake)
+    monkeypatch.setattr(cache_module, "_unavailable_logged", False)
+    yield fake
+    fake.clear()
 
 
 @pytest.fixture

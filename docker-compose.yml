@@ -37,6 +37,7 @@ services:
       - .env
     volumes:
       - ./backend:/app
+      - media_data:/data/media
     environment:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
@@ -46,6 +47,8 @@ services:
       WATERMARK_CACHE_TTL_SECONDS: ${WATERMARK_CACHE_TTL_SECONDS:-3600}
       TOKEN_REVOCATION_REDIS_URL: ${TOKEN_REVOCATION_REDIS_URL:-redis://redis:6379/3}
       SECRET_KEY: ${SECRET_KEY}
+      ORIGINAL_MEDIA_STORAGE_PATH: ${ORIGINAL_MEDIA_STORAGE_PATH:-/data/media/original}
+      MAX_MEDIA_SIZE_BYTES: ${MAX_MEDIA_SIZE_BYTES:-10485760}
     command: bash ./entrypoint.sh
     ports:
       - "8000:8000"
@@ -124,6 +127,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  media_data:
 
 networks:
   cc_net:

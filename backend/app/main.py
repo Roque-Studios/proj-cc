@@ -6,8 +6,7 @@ from sqlalchemy import text
 from .database import get_db
 from .logger import setup_logging
 from sqlalchemy.orm import Session
-from . import cache
-from .routers import auth, creator, subscriptions, viewer, webhooks
+from .routers import admin, auth, content, creator, posts, subscriptions, viewer, webhooks
 
 setup_logging()
 logger = structlog.get_logger()
@@ -23,6 +22,9 @@ app.include_router(creator.router)
 app.include_router(viewer.router)
 app.include_router(webhooks.router)
 app.include_router(subscriptions.router)
+app.include_router(posts.router)
+app.include_router(content.router)
+app.include_router(admin.router)
 
 
 @app.middleware("http")
@@ -30,10 +32,11 @@ async def media_no_store(request: Request, call_next):
     """Never let clients cache media responses.
 
     Watermarked media is volatile (TTL-cached in Redis), so browsers/CDNs must
-    not store it. Nginx enforces the same header on media paths for good measure.
+    not store it. The content-media handler also sets the header directly;
+    this middleware plus nginx enforce it on the whole path for good measure.
     """
     response = await call_next(request)
-    if request.url.path.startswith("/media"):
+    if request.url.path.startswith("/content"):
         response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -62,20 +65,3 @@ def health_check(db: Session = Depends(get_db)):
     return {"status": status, "db": db_status, "redis": redis_status}
 
 
-@app.api_route("/media/{media_id}", methods=["GET", "HEAD"])
-def get_media(media_id: str):
-    """Placeholder media endpoint.
-
-    Serves bytes from the Redis watermarked-media cache, generating a dummy
-    payload and caching it on first access. To be replaced by the real
-    watermarking pipeline. Always responds with ``Cache-Control: no-store``
-    (set by the media_no_store middleware).
-    """
-    data = cache.get_cached_watermarked_media(media_id)
-    if data is None:
-        logger.info("Media cache miss, generating placeholder", media_id=media_id)
-        data = f"watermarked:{media_id}:placeholder".encode()
-        cache.set_watermarked_media(media_id, data)
-    else:
-        logger.debug("Media served from cache", media_id=media_id)
-    return Response(content=data, media_type="application/octet-stream")

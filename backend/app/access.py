@@ -25,7 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .database import get_db
-from .deps import _bearer, resolve_authenticated_user
+from .deps import resolve_authenticated_user
 from .models import Subscription, SubscriptionStatus, User, UserRole
 
 _FOLLOWER_STATUSES = (SubscriptionStatus.active, SubscriptionStatus.trialing)
@@ -81,43 +81,74 @@ def _resolve_creator_id(request: Request, creator_id: int | None) -> int | None:
         return None
 
 
+def _credentials_from(request: Request) -> HTTPAuthorizationCredentials | None:
+    """Bearer credentials from the ``Authorization`` header or ``?token=``.
+
+    ``<img>`` tags cannot send an ``Authorization`` header, so media endpoints
+    accept the access token as a ``?token=`` query parameter as well. Header
+    credentials win when both are present.
+    """
+    auth = request.headers.get("Authorization")
+    if auth:
+        scheme, _, param = auth.partition(" ")
+        if scheme.lower() == "bearer" and param:
+            return HTTPAuthorizationCredentials(scheme="Bearer", credentials=param)
+    token = request.query_params.get("token")
+    if token:
+        return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+    return None
+
+
+def resolve_viewer_context(
+    request: Request,
+    creator_id: int | None,
+    db: Session,
+) -> ViewerContext:
+    """Classify the request against a specific creator (no dependency magic).
+
+    Shared by the ``resolve_viewer_access`` dependency factory and routes that
+    resolve the target creator themselves (e.g. the content-media endpoint,
+    where the path carries ``post_id`` rather than ``creator_id``).
+    """
+    user = resolve_authenticated_user(_credentials_from(request), db)
+    if user is None:
+        return ViewerContext(level=ViewerAccessLevel.anonymous)
+
+    if creator_id is not None:
+        creator = db.get(User, creator_id)
+        is_real_creator = (
+            creator is not None
+            and creator.is_active
+            and creator.role == UserRole.creator
+        )
+        subscription = None
+        if is_real_creator:
+            subscription = db.scalar(
+                select(Subscription).where(
+                    Subscription.subscriber_id == user.id,
+                    Subscription.creator_id == creator_id,
+                    Subscription.status.in_(_FOLLOWER_STATUSES),
+                )
+            )
+        if subscription is not None and _period_is_current(subscription):
+            return ViewerContext(
+                level=ViewerAccessLevel.follower,
+                user=user,
+                creator=creator,
+                subscription=subscription,
+            )
+
+    return ViewerContext(level=ViewerAccessLevel.registered, user=user)
+
+
 def resolve_viewer_access(creator_id: int | None = None) -> Callable[..., ViewerContext]:
     """Dependency factory classifying the request for a given creator."""
 
     def dependency(
         request: Request,
-        credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
         db: Session = Depends(get_db),
     ) -> ViewerContext:
-        user = resolve_authenticated_user(credentials, db)
-        if user is None:
-            return ViewerContext(level=ViewerAccessLevel.anonymous)
-
         target_creator_id = _resolve_creator_id(request, creator_id)
-        if target_creator_id is not None:
-            creator = db.get(User, target_creator_id)
-            is_real_creator = (
-                creator is not None
-                and creator.is_active
-                and creator.role == UserRole.creator
-            )
-            subscription = None
-            if is_real_creator:
-                subscription = db.scalar(
-                    select(Subscription).where(
-                        Subscription.subscriber_id == user.id,
-                        Subscription.creator_id == target_creator_id,
-                        Subscription.status.in_(_FOLLOWER_STATUSES),
-                    )
-                )
-            if subscription is not None and _period_is_current(subscription):
-                return ViewerContext(
-                    level=ViewerAccessLevel.follower,
-                    user=user,
-                    creator=creator,
-                    subscription=subscription,
-                )
-
-        return ViewerContext(level=ViewerAccessLevel.registered, user=user)
+        return resolve_viewer_context(request, target_creator_id, db)
 
     return dependency
