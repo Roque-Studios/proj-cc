@@ -112,6 +112,92 @@ def test_mock_payment_succeeded_idempotent_on_redelivery(db_session, monkeypatch
         assert _ledger(db) == [("mock", "evt_mock_success_1")]
 
 
+def test_activation_backfills_billing_period_when_event_has_none(db_session):
+    """A period-less payment event (Wompi payment links) sets a 30-day window.
+
+    Wompi payment-link webhooks are flat transaction payloads — no billing
+    period. When such an event activates a subscription the service backfills
+    ``current_period_start``/``current_period_end`` from the paid moment, so
+    days-left and the expiry task still work.
+    """
+    with db_session as db:
+        subscriber, creator = _subscriber_and_creator(db)
+        sub = Subscription(
+            subscriber_id=subscriber.id,
+            creator_id=creator.id,
+            status=SubscriptionStatus.incomplete,
+            payment_provider="mock",
+            external_ref="sub_wompi_link",
+            checkout_url="https://wompi.test/link",
+            # No period — exactly what a payment-link flow leaves behind.
+            current_period_start=None,
+            current_period_end=None,
+        )
+        db.add(sub)
+        db.commit()
+        db.refresh(sub)
+        service = SubscriptionService(db, provider=MockPaymentProvider())
+
+        body = MockPaymentProvider.make_webhook_body(
+            "payment.succeeded",
+            external_ref=sub.external_ref,
+            event_id="evt_mock_wompi_style",
+        )
+        service.handle_webhook(body, MockPaymentProvider.sign_body(body))
+        db.refresh(sub)
+
+        assert sub.status == SubscriptionStatus.active
+        assert sub.current_period_start is not None
+        assert sub.current_period_end is not None
+        # The window is ~30 days from the paid moment (a few seconds of slack).
+        # SQLite returns naive datetimes, so compare against a naive clock.
+        expected_end = datetime.utcnow() + timedelta(days=30)
+        delta = abs((sub.current_period_end - expected_end).total_seconds())
+        assert delta < 60, f"period_end {sub.current_period_end} not ~30 days out"
+        assert _ledger(db) == [("mock", "evt_mock_wompi_style")]
+
+
+def test_period_less_renewal_extends_the_window(db_session):
+    """A period-less payment on an *active* row extends access by one month.
+
+    The Wompi one-time-link model: each payment-link payment buys a month.
+    A second payment while the row is still active must extend
+    ``current_period_end`` (from the current window, not reset it) — otherwise
+    the subscriber pays for month 2 but access still lapses after month 1.
+    """
+    with db_session as db:
+        subscriber, creator = _subscriber_and_creator(db)
+        sub = Subscription(
+            subscriber_id=subscriber.id,
+            creator_id=creator.id,
+            status=SubscriptionStatus.active,
+            current_period_start=NOW - timedelta(days=20),
+            current_period_end=NOW + timedelta(days=10),
+            payment_provider="mock",
+            external_ref="sub_wompi_link2",
+        )
+        db.add(sub)
+        db.commit()
+        db.refresh(sub)
+        service = SubscriptionService(db, provider=MockPaymentProvider())
+
+        body = MockPaymentProvider.make_webhook_body(
+            "payment.succeeded",
+            external_ref=sub.external_ref,
+            event_id="evt_mock_wompi_renewal",
+        )
+        service.handle_webhook(body, MockPaymentProvider.sign_body(body))
+        db.refresh(sub)
+
+        assert sub.status == SubscriptionStatus.active
+        # Extended from the old window end (NOW+10d) by a month, i.e. NOW+40d
+        # — NOT reset to a fresh ~NOW+30d. SQLite returns naive datetimes.
+        expected = NOW + timedelta(days=40)
+        stored = sub.current_period_end.replace(tzinfo=timezone.utc)
+        delta = abs((stored - expected).total_seconds())
+        assert delta < 120, f"period_end {sub.current_period_end} not extended ~40 days out"
+
+
 def test_mock_payment_failed_notifies_exactly_once(db_session, monkeypatch):
     """A failed renewal -> past_due + exactly one notification (grace period)."""
     notifications = []

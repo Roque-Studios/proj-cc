@@ -12,6 +12,17 @@ _PASSWORD_UPPER = re.compile(r"[A-Z]")
 _PASSWORD_DIGIT = re.compile(r"\d")
 
 
+def validate_password_complexity(value: str) -> str:
+    """Enforce the shared password rule (register + change-password)."""
+    if not _PASSWORD_LOWER.search(value):
+        raise ValueError("Password must contain at least one lowercase letter")
+    if not _PASSWORD_UPPER.search(value):
+        raise ValueError("Password must contain at least one uppercase letter")
+    if not _PASSWORD_DIGIT.search(value):
+        raise ValueError("Password must contain at least one digit")
+    return value
+
+
 class UserRegister(BaseModel):
     """Registration payload: email/password (username optional, derived from email)."""
 
@@ -22,13 +33,7 @@ class UserRegister(BaseModel):
     @field_validator("password")
     @classmethod
     def _validate_password_complexity(cls, value: str) -> str:
-        if not _PASSWORD_LOWER.search(value):
-            raise ValueError("Password must contain at least one lowercase letter")
-        if not _PASSWORD_UPPER.search(value):
-            raise ValueError("Password must contain at least one uppercase letter")
-        if not _PASSWORD_DIGIT.search(value):
-            raise ValueError("Password must contain at least one digit")
-        return value
+        return validate_password_complexity(value)
 
     @field_validator("username")
     @classmethod
@@ -40,6 +45,23 @@ class UserRegister(BaseModel):
         if len(stripped) < 3:
             raise ValueError("Username must be at least 3 characters")
         return stripped
+
+
+class ChangePasswordRequest(BaseModel):
+    """Change the authenticated user's password.
+
+    ``current_password`` must match the stored hash; ``new_password`` follows
+    the same complexity rules as registration (the profile page enforces them
+    client-side too).
+    """
+
+    current_password: str
+    new_password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def _validate_password_complexity(cls, value: str) -> str:
+        return validate_password_complexity(value)
 
 
 class UserLogin(BaseModel):
@@ -216,6 +238,34 @@ class SubscribeResponse(BaseModel):
     subscription: SubscriptionOut
     checkout_url: str | None
     status: str
+
+
+class MySubscriptionOut(BaseModel):
+    """One subscription in the authenticated user's profile.
+
+    ``creator_id``/``creator_username``/``creator_display_name`` identify the
+    creator they subscribed to; ``days_left`` is the whole days remaining in
+    the current billing period (``None`` when the row has no period end or is
+    no longer active).
+    """
+
+    subscription_id: int
+    creator_id: int
+    creator_username: str | None
+    creator_display_name: str | None
+    status: str
+    current_period_start: datetime | None
+    current_period_end: datetime | None
+    cancel_at_period_end: bool
+    payment_provider: str | None
+    created_at: datetime
+    days_left: int | None
+
+
+class MySubscriptionsOut(BaseModel):
+    """The authenticated user's subscriptions (newest first)."""
+
+    items: list[MySubscriptionOut]
 
 
 class SubscribeStatusOut(BaseModel):

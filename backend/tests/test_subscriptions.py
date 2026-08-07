@@ -28,6 +28,73 @@ def _create_user(db, email: str) -> User:
     return user
 
 
+def test_my_subscriptions_endpoint_lists_rows_with_days_left(client, db_session):
+    """The subscriber profile endpoint returns rows with creator + days left."""
+    from datetime import timedelta
+
+    from app.models import SubscriptionStatus
+
+    # A creator and a subscriber via the API (creator needs a profile row for
+    # the display name lookup).
+    reg = client.post(
+        "/auth/register",
+        json={"email": "subme@example.com", "password": "StrongPass1"},
+    )
+    assert reg.status_code == 201
+    token = client.post(
+        "/auth/login",
+        json={"email": "subme@example.com", "password": "StrongPass1"},
+    ).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    with db_session as db:
+        # One creator per row (the (subscriber, creator) pair is unique).
+        creator_a = _create_user(db, "creator-a@example.com")
+        creator_a.role = UserRole.creator
+        creator_a.is_creator = True
+        creator_b = _create_user(db, "creator-b@example.com")
+        creator_b.role = UserRole.creator
+        creator_b.is_creator = True
+        db.commit()
+
+        active = Subscription(
+            subscriber_id=_subscriber_id(client, headers),
+            creator_id=creator_a.id,
+            status=SubscriptionStatus.active,
+            current_period_start=datetime.now(timezone.utc),
+            current_period_end=datetime.now(timezone.utc) + timedelta(days=9),
+            payment_provider="mock",
+        )
+        canceled = Subscription(
+            subscriber_id=_subscriber_id(client, headers),
+            creator_id=creator_b.id,
+            status=SubscriptionStatus.canceled,
+        )
+        db.add_all([active, canceled])
+        db.commit()
+        active_id, canceled_id = active.id, canceled.id
+
+    resp = client.get("/me/subscriptions", headers=headers)
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    by_id = {i["subscription_id"]: i for i in items}
+    assert set(by_id) == {active_id, canceled_id}
+    active_out = by_id[active_id]
+    assert active_out["creator_username"] == "creator-a"
+    assert active_out["status"] == "active"
+    assert active_out["days_left"] == 9
+    # Non-active rows carry no days-left.
+    assert by_id[canceled_id]["days_left"] is None
+
+
+def test_my_subscriptions_requires_auth(client):
+    assert client.get("/me/subscriptions").status_code == 401
+
+
+def _subscriber_id(client, headers) -> int:
+    return client.get("/auth/me", headers=headers).json()["id"]
+
+
 def test_user_has_independent_subscriptions_per_creator(db_session):
     with db_session as db:
         subscriber = _create_user(db, "sub@example.com")

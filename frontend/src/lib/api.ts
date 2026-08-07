@@ -261,6 +261,25 @@ export interface SubscriptionInfo {
   updated_at: string
 }
 
+export interface MySubscription {
+  subscription_id: number
+  creator_id: number
+  creator_username: string | null
+  creator_display_name: string | null
+  status: string
+  current_period_start: string | null
+  current_period_end: string | null
+  cancel_at_period_end: boolean
+  payment_provider: string | null
+  created_at: string
+  // Whole days left in the current billing period (null when not active).
+  days_left: number | null
+}
+
+export interface MySubscriptions {
+  items: MySubscription[]
+}
+
 export interface SubscribeStatus {
   viewer_level: 'anonymous' | 'registered' | 'follower'
   subscription: SubscriptionInfo | null
@@ -326,6 +345,21 @@ export const api = {
 
   me(): Promise<UserMe> {
     return request<UserMe>('/auth/me')
+  },
+
+  changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    return request<void>('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    })
+  },
+
+  // The authenticated user's own subscriptions (profile page: days left).
+  getMySubscriptions(): Promise<MySubscriptions> {
+    return request<MySubscriptions>('/me/subscriptions')
   },
 
   logout(refreshToken: string): Promise<void> {

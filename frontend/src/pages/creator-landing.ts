@@ -7,10 +7,11 @@ import '../components/layouts/card.ts'
 import '../components/buttons/button.ts'
 import '../components/media/icon.ts'
 import '../components/media/media-viewer.ts'
+import '../components/navigation/site-menu.ts'
 import '../components/feedback/spinner.ts'
 import '../components/feed/subscriber-feed.ts'
-import { api, ApiError } from '../lib/api'
-import type { CreatorLanding } from '../lib/api'
+import { api, ApiError, clearTokens, getAccessToken } from '../lib/api'
+import type { CreatorLanding, UserMe } from '../lib/api'
 
 /**
  * Public creator landing page — the site root (`/`) and `/creator/{id}`
@@ -37,6 +38,8 @@ export class CreatorLandingPage extends LitElement {
   @state() private loading = true
   @state() private error = ''
   @state() private missingCreatorId = false
+  /** The signed-in user for the hamburger menu (null = anonymous). */
+  @state() private me: UserMe | null = null
   /** Full-screen viewer state: urls + index, or null when closed. */
   @state() private viewer: { urls: string[]; index: number } | null = null
 
@@ -303,7 +306,25 @@ export class CreatorLandingPage extends LitElement {
 
   async connectedCallback() {
     super.connectedCallback()
+    void this._loadSession()
     await this._resolveCreatorId()
+  }
+
+  private async _loadSession() {
+    if (!getAccessToken()) return
+    try {
+      this.me = await api.me()
+    } catch {
+      // Stale token — request() already cleared it; the menu shows anonymous.
+    }
+  }
+
+  private _onLogout() {
+    const refresh = localStorage.getItem('cc_refresh_token')
+    if (refresh) api.logout(refresh).catch(() => undefined)
+    clearTokens()
+    this.me = null
+    window.location.href = '/'
   }
 
   private async _resolveCreatorId() {
@@ -419,6 +440,7 @@ export class CreatorLandingPage extends LitElement {
     const bannerUrl = profile.banner_url || ''
 
     return html`
+      <roque-site-menu .user="${this.me}" @aero-logout="${this._onLogout}"></roque-site-menu>
       <div class="page">
         <!-- Hero: banner, avatar, name + online dot, post count, bio, CTA -->
         <div class="hero">

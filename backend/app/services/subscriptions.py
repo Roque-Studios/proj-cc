@@ -11,7 +11,7 @@ The provider is injected (constructor), defaulting to the configured one from
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Mapping
 
 import structlog
@@ -38,6 +38,12 @@ from ..payments import (
 )
 
 logger = structlog.get_logger()
+
+# The monthly tier's access window. Providers whose events don't report a
+# billing period (Wompi payment links are flat transaction payloads) get their
+# period backfilled from the paid moment — same length the mock/stripe
+# providers use when creating the subscription.
+_TIER_PERIOD_DAYS = 30
 
 # Normalized provider status string -> our model status.
 _STATUS_MAP = {
@@ -335,10 +341,47 @@ class SubscriptionService:
                 subscription.checkout_url = None
         # Apply the billing period reported by the event (e.g. from Stripe
         # invoice events) so current_period_end tracks the paid period.
+        period_supplied = event.period_start is not None or event.period_end is not None
         if event.period_start is not None:
             subscription.current_period_start = event.period_start
         if event.period_end is not None:
             subscription.current_period_end = event.period_end
+        # Providers whose events never carry a billing period (Wompi payment
+        # links are flat transaction payloads) leave the period unset even
+        # after a successful charge — the monthly tier's access window is then
+        # backfilled from the paid moment so days-left and expiry still work.
+        # A provider-supplied period above always wins (this only fills a gap).
+        period_backfilled = False
+        if (
+            subscription.status in (SubscriptionStatus.active, SubscriptionStatus.trialing)
+            and subscription.current_period_end is None
+        ):
+            # First activation (or a row that lost its window): fresh month.
+            paid_at = datetime.now(timezone.utc)
+            if subscription.current_period_start is None:
+                subscription.current_period_start = paid_at
+            subscription.current_period_end = paid_at + timedelta(days=_TIER_PERIOD_DAYS)
+            period_backfilled = True
+        elif (
+            not period_supplied
+            and new_status == SubscriptionStatus.active
+            and previous_status == SubscriptionStatus.active
+            and event.event_type == WebhookEventType.payment_succeeded
+            and subscription.current_period_end is not None
+        ):
+            # On-time renewal from a provider with no period data (a second
+            # Wompi payment-link payment while access persists): each payment
+            # buys one month — extend the current window (or start a fresh one
+            # when it already lapsed). Idempotent redeliveries are deduped by
+            # the event-id ledger, so this can't double-extend.
+            period_end = subscription.current_period_end
+            if period_end.tzinfo is None:
+                period_end = period_end.replace(tzinfo=timezone.utc)
+            paid_at = datetime.now(timezone.utc)
+            subscription.current_period_end = max(period_end, paid_at) + timedelta(
+                days=_TIER_PERIOD_DAYS
+            )
+            period_backfilled = True
 
         # Revenue ledger: every *completed monthly payment* records one tier
         # payment for the creator. The money signal is ``payment_succeeded``
@@ -379,6 +422,7 @@ class SubscriptionService:
             ref_adopted
             or new_status is not None
             or event.period_end is not None
+            or period_backfilled
         )
         if event.id is not None:
             self.db.add(

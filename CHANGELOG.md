@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.27.0] - 2026-08-07
+### Fixed
+- **Days left now shows on the profile page**: Wompi payment-link webhooks are flat transaction payloads that never report a billing period, so `current_period_end` stayed `NULL` after a paid subscription activated — `GET /me/subscriptions` returned `days_left: null` and the profile's "N days left" card showed "—". The webhook reconciliation now backfills the monthly tier's window: a first payment starts a fresh 30-day period, and a renewal payment while access persists **extends** the window by one month (a provider-reported period always wins; idempotent redeliveries are ledger-deduped so access can't double-extend). Existing live rows with an active status and no period were backfilled from their `created_at`
+- **Back navigation on the profile page**: a "Back to feed" button (arrow icon) in the page header takes subscribers back to `/feed` — shown in the loading, error and loaded states so the page never strands the user
+- **`/feed` without a creator id**: the feed page now falls back to the **first/seed creator** (`GET /creators/default/landing`) when no `?creator_id=` is present — the same site-root default the home page uses — so the profile page's back button (and any bare `/feed` visit) shows a real feed instead of the "Missing creator id" error. Only when no creator account exists at all does it show an empty state
+### Changed
+- **`/feed` shows the full creator profile**: the feed page's compact avatar+name header is now the full **hero** — banner image (gradient fallback), clickable avatar (opens the full-screen viewer), display name + online dot, @handle with post count, bio, and the creator's social-link chips (same http(s)-only safe links as the home page). `/feed` remains the post-checkout landing, so after subscribing the creator's whole profile is visible alongside the feed
+
+## [0.26.0] - 2026-08-07
+### Added
+- **Mobile-first hamburger menu** (`roque-site-menu`) on the landing page and the subscriber feed page: a sticky top bar with a slide-in drawer. Anonymous visitors get **Sign in** / **Create account** (both open the shared `/login`, which has the register flow built in); signed-in users get **My profile** (`/profile`) and **Sign out**
+- **Subscriber profile page** (`/profile`, `profile.html` + `roque-subscriber-profile`): account details (email / username / role), a **My subscriptions** card showing each creator followed, the subscription status badge, and **days left** in the current billing period (from the new `GET /me/subscriptions`), plus a **Change password** form (`POST /auth/change-password` — verifies the current password, enforces the same complexity rules as registration, then signs the user out to re-authenticate with the new password)
+- New icons: hamburger menu, user, logout, clock, key
+
 ## [0.25.0] - 2026-08-07
 ### Added
 - **Media carousel**: posts with more than one photo now render as a swipeable/scrollable carousel (snap-scroll track, prev/next arrows, active dots + a "n / m" counter) instead of a vertical stack — in the subscriber feed on the home route and `/feed`

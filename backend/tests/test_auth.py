@@ -164,6 +164,55 @@ def test_me_with_garbage_token_returns_401(client):
 
 
 # --------------------------------------------------------------------------- #
+# Change password
+# --------------------------------------------------------------------------- #
+
+def test_change_password_requires_auth(client):
+    resp = client.post(
+        "/auth/change-password",
+        json={"current_password": "x", "new_password": "StrongPass2"},
+    )
+    assert resp.status_code == 401
+
+
+def test_change_password_success(client):
+    _register(client)
+    headers = {"Authorization": f"Bearer {_login(client).json()['access_token']}"}
+    resp = client.post(
+        "/auth/change-password",
+        json={"current_password": "StrongPass1", "new_password": "BrandNew99"},
+        headers=headers,
+    )
+    assert resp.status_code == 204
+    # The new password signs in; the old one no longer does.
+    assert _login(client, password="BrandNew99").status_code == 200
+    assert _login(client, password="StrongPass1").status_code == 401
+
+
+def test_change_password_wrong_current_rejected(client):
+    _register(client)
+    headers = {"Authorization": f"Bearer {_login(client).json()['access_token']}"}
+    resp = client.post(
+        "/auth/change-password",
+        json={"current_password": "WrongPass1", "new_password": "BrandNew99"},
+        headers=headers,
+    )
+    assert resp.status_code == 400
+    assert "Current password" in resp.json()["detail"]
+
+
+def test_change_password_enforces_complexity(client):
+    _register(client)
+    headers = {"Authorization": f"Bearer {_login(client).json()['access_token']}"}
+    resp = client.post(
+        "/auth/change-password",
+        json={"current_password": "StrongPass1", "new_password": "weak"},
+        headers=headers,
+    )
+    assert resp.status_code == 422
+
+
+# --------------------------------------------------------------------------- #
 # Refresh
 # --------------------------------------------------------------------------- #
 

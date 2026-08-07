@@ -38,6 +38,7 @@ export default defineConfig({
         feed: fileURLToPath(new URL('./feed.html', import.meta.url)),
         checkout: fileURLToPath(new URL('./checkout.html', import.meta.url)),
         chat: fileURLToPath(new URL('./chat.html', import.meta.url)),
+        profile: fileURLToPath(new URL('./profile.html', import.meta.url)),
       },
     },
   },

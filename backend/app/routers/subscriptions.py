@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -25,6 +27,8 @@ from ..payments import PaymentProvider, ProviderConfigurationError
 from ..payments.factory import build_provider_from_config, resolve_plan_id
 from ..schemas import (
     CancelRequest,
+    MySubscriptionOut,
+    MySubscriptionsOut,
     SubscribeRequest,
     SubscribeResponse,
     SubscribeStatusOut,
@@ -80,6 +84,66 @@ def subscribe(
         checkout_url=subscription.checkout_url,
         status=subscription.status.value,
     )
+
+
+@router.get("/me/subscriptions", response_model=MySubscriptionsOut)
+def my_subscriptions(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Every subscription the authenticated user holds (newest first).
+
+    Powers the subscriber profile page: which creators they follow, each
+    row's status, and the **days left** in the current billing period (from
+    ``current_period_end``) so the page can show "N days left" per active
+    subscription.
+    """
+    rows = db.scalars(
+        select(Subscription)
+        .where(Subscription.subscriber_id == user.id)
+        .order_by(Subscription.created_at.desc())
+    ).all()
+    items: list[MySubscriptionOut] = []
+    for sub in rows:
+        creator = db.get(User, sub.creator_id)
+        profile = creator.creator_profile if creator is not None else None
+        items.append(
+            MySubscriptionOut(
+                subscription_id=sub.id,
+                creator_id=sub.creator_id,
+                creator_username=creator.username if creator is not None else None,
+                creator_display_name=(
+                    profile.display_name if profile is not None else None
+                ),
+                status=sub.status.value,
+                current_period_start=sub.current_period_start,
+                current_period_end=sub.current_period_end,
+                cancel_at_period_end=sub.cancel_at_period_end,
+                payment_provider=sub.payment_provider,
+                created_at=sub.created_at,
+                days_left=_days_left(sub),
+            )
+        )
+    return MySubscriptionsOut(items=items)
+
+
+def _days_left(sub: Subscription) -> int | None:
+    """Days until ``current_period_end`` for an active/trialing row.
+
+    Rounds **up** so "9 days left" stays accurate across the day boundary
+    (9.0 days and 8.1 days both read as 9) and never shows 0 while access
+    still exists.
+    """
+    if sub.status not in (SubscriptionStatus.active, SubscriptionStatus.trialing):
+        return None
+    if sub.current_period_end is None:
+        return None
+    period_end = sub.current_period_end
+    if period_end.tzinfo is None:
+        # SQLite returns naive datetimes; treat them as UTC.
+        period_end = period_end.replace(tzinfo=timezone.utc)
+    remaining = period_end - datetime.now(timezone.utc)
+    return max((remaining.total_seconds() + 86399) // 86400, 0)
 
 
 @router.get("/subscribe/status", response_model=SubscribeStatusOut)
