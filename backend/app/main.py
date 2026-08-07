@@ -13,6 +13,7 @@ from .routers import (
     creator,
     creator_content,
     creator_subscribers,
+    media_public,
     messages,
     posts,
     public,
@@ -41,6 +42,7 @@ app.include_router(subscriptions.router)
 app.include_router(posts.router)
 app.include_router(public.router)
 app.include_router(content.router)
+app.include_router(media_public.router)
 app.include_router(admin.router)
 app.include_router(messages.router)
 app.include_router(realtime.router)
@@ -55,7 +57,9 @@ async def media_no_store(request: Request, call_next):
     this middleware plus nginx enforce it on the whole path for good measure.
     """
     response = await call_next(request)
-    if request.url.path.startswith("/content"):
+    if request.url.path.startswith("/content") or request.url.path.startswith(
+        "/preview"
+    ):
         response.headers["Cache-Control"] = "no-store"
     return response
 

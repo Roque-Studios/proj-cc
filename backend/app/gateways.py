@@ -88,9 +88,9 @@ GATEWAYS: dict[str, GatewaySpec] = {
     ),
     "wompi": GatewaySpec(
         name="wompi",
-        label="Wompi (El Salvador)",
+        label="Wompi",
         description=(
-            "El Salvador cards via Wompi. Only two variables are needed: your "
+            "Cards via Wompi. Only two variables are needed: your "
             "App ID (client id) and API Secret (client secret) from the Wompi "
             "dashboard."
         ),

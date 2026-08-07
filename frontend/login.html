@@ -3,16 +3,16 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Admin — Content Creator Engine</title>
+        <title>Sign in</title>
         <!--
-            Creator (admin) dashboard. This file is an alias of the /admin
-            page (see admin.html): /settings.html keeps working for anyone who
-            already has the URL, while /admin is the canonical entry. Login
-            with the seeded creator account (python -m app.seed_creator).
+            Shared sign-in page for every role (followers and creators).
+            After sign-in the user is redirected by role: creators to the
+            /admin dashboard, members back to the page they came from (the
+            optional ?next= parameter).
         -->
         <script
             type="module"
-            src="/src/pages/creator-settings-app.ts"
+            src="/src/pages/login-page.ts"
         ></script>
         <style>
             body {
@@ -23,6 +23,6 @@
         </style>
     </head>
     <body>
-        <roque-settings-app></roque-settings-app>
+        <roque-login-page></roque-login-page>
     </body>
 </html>

@@ -15,7 +15,8 @@ import type { CreatorMedia, CreatorPost } from '../lib/api'
 
 /**
  * Creator content dashboard: every post/broadcast with its engagement stats
- * (views, unlock count), plus edit-caption, delete, and visibility controls.
+ * (views, unlock count), plus publishing (caption + photos, optional paid
+ * broadcast price), edit-caption, delete, and visibility controls.
  * Mobile-first: cards stack full-width on small screens and form a two-column
  * grid on wider ones.
  */
@@ -32,6 +33,13 @@ export class CreatorContentManager extends LitElement {
   @state() private editCaption = ''
   @state() private editVisible = true
   @state() private deleting: CreatorPost | null = null
+  @state() private composing = false
+  @state() private composeCaption = ''
+  @state() private composePicks: { file: File; preview: string }[] = []
+  @state() private composePaid = false
+  @state() private composePrice = ''
+  @state() private composeError = ''
+  @state() private publishing = false
 
   static styles = css`
     :host {
@@ -66,6 +74,14 @@ export class CreatorContentManager extends LitElement {
       color: #4a5b6e;
       max-width: 560px;
       line-height: 1.5;
+    }
+
+    .topbar-actions {
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+      justify-content: flex-end;
     }
 
     .stats-bar {
@@ -223,6 +239,95 @@ export class CreatorContentManager extends LitElement {
     .error-zone {
       margin-bottom: 16px;
     }
+
+    /* --- Publish composer --- */
+    .composer {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .upload-row {
+      display: flex;
+    }
+
+    .file-picker {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 18px 12px;
+      text-align: center;
+      color: #1e395b;
+      background: #f6fafc;
+      border: 1px dashed #9db8cc;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: border-color 0.2s ease, background 0.2s ease;
+    }
+
+    .file-picker:hover {
+      border-color: #3c7fb1;
+      background: #eaf4fb;
+    }
+
+    .file-hint {
+      font-size: 11px;
+      color: #6b7a8a;
+    }
+
+    .picks {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .pick {
+      position: relative;
+      width: 84px;
+      height: 84px;
+    }
+
+    .pick img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border: 1px solid #c8d4de;
+      border-radius: 4px;
+      background: #eef3f7;
+    }
+
+    .pick-remove {
+      position: absolute;
+      top: -6px;
+      right: -6px;
+      width: 20px;
+      height: 20px;
+      line-height: 18px;
+      padding: 0;
+      font-size: 14px;
+      color: #fff;
+      background: #b03a3a;
+      border: 1px solid #7a1d12;
+      border-radius: 50%;
+      cursor: pointer;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    }
+
+    .pick-remove:hover {
+      background: #d14646;
+    }
+
+    .pick-remove:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .empty-cta {
+      margin-top: 12px;
+    }
   `
 
   async connectedCallback() {
@@ -367,6 +472,232 @@ export class CreatorContentManager extends LitElement {
   }
 
   // ------------------------------------------------------------------ #
+  // Publish composer
+  // ------------------------------------------------------------------ #
+
+  private _openComposer() {
+    this.composeCaption = ''
+    this.composePaid = false
+    this.composePrice = ''
+    this.composeError = ''
+    this._releaseComposePicks()
+    this.composePicks = []
+    this.composing = true
+  }
+
+  private _closeComposer() {
+    if (this.publishing) return
+    this.composing = false
+    this._releaseComposePicks()
+    this.composePicks = []
+    this.composeError = ''
+  }
+
+  private _releaseComposePicks() {
+    for (const pick of this.composePicks) {
+      URL.revokeObjectURL(pick.preview)
+    }
+  }
+
+  private _onFilesPicked(e: Event) {
+    if (this.publishing) return
+    const input = e.target as HTMLInputElement
+    const files = Array.from(input.files ?? [])
+    input.value = '' // allow re-picking the same file
+    if (files.length === 0) return
+    const picks = files.map((file) => ({
+      file,
+      preview: URL.createObjectURL(file),
+    }))
+    this.composePicks = [...this.composePicks, ...picks]
+    this.composeError = ''
+  }
+
+  private _removePick(index: number) {
+    URL.revokeObjectURL(this.composePicks[index].preview)
+    this.composePicks = this.composePicks.filter((_, i) => i !== index)
+  }
+
+  private _onComposeCaption(e: CustomEvent) {
+    this.composeCaption = e.detail?.value ?? ''
+  }
+
+  private _onComposePaid(e: CustomEvent) {
+    this.composePaid = e.detail?.checked ?? false
+    this.composeError = ''
+  }
+
+  private _onComposePrice(e: CustomEvent) {
+    this.composePrice = e.detail?.value ?? ''
+    this.composeError = ''
+  }
+
+  private _priceCents(): number | null {
+    if (!this.composePaid) return null
+    const value = Number(this.composePrice)
+    if (!Number.isFinite(value) || value <= 0) return null
+    return Math.round(value * 100)
+  }
+
+  private async _publish() {
+    if (this.publishing) return
+    this.composeError = ''
+    if (this.composePicks.length === 0) {
+      this.composeError = 'Add at least one photo to publish a post.'
+      return
+    }
+    const priceCents = this._priceCents()
+    if (this.composePaid && priceCents == null) {
+      this.composeError = 'Enter a valid unlock price, e.g. 4.99.'
+      return
+    }
+    // Mirror the backend's price cap (price_cents <= 100000) so a too-large
+    // price fails with a friendly message, not a generic 422.
+    if (priceCents != null && priceCents > 100_000) {
+      this.composeError = 'The unlock price cannot exceed $1,000.'
+      return
+    }
+    // Mirror the backend's per-file cap (MAX_MEDIA_SIZE_BYTES) with a friendly
+    // message before the upload starts.
+    const oversized = this.composePicks.find((p) => p.file.size > 10 * 1024 * 1024)
+    if (oversized) {
+      this.composeError = `${oversized.file.name} is larger than the 10 MB per-file limit.`
+      return
+    }
+
+    this.publishing = true
+    try {
+      const created = await api.createCreatorPost(
+        this.composePicks.map((p) => p.file),
+        this.composeCaption,
+        priceCents ?? undefined,
+      )
+      this.composing = false
+      this._releaseComposePicks()
+      this.composePicks = []
+      this.composeCaption = ''
+      this.composePaid = false
+      this.composePrice = ''
+      this.posts = [created, ...this.posts]
+      this._toast(
+        created.broadcast_price_cents != null
+          ? 'Broadcast published'
+          : 'Post published',
+        created.broadcast_price_cents != null
+          ? 'Subscribers can now unlock it for a one-time price.'
+          : 'Your post is live for followers.',
+      )
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 413) {
+        this.composeError = 'One of the files exceeds the 10 MB size limit.'
+      } else if (err instanceof ApiError && err.status === 401) {
+        this._handleError(err)
+      } else {
+        this.composeError =
+          err instanceof Error ? err.message : 'Could not publish — please try again.'
+      }
+    } finally {
+      this.publishing = false
+    }
+  }
+
+  private _renderComposer() {
+    return html`
+      <roque-dialog
+        windowTitle="Publish a post"
+        ?open="${this.composing}"
+        @aero-cancel="${this._closeComposer}"
+      >
+        <div class="composer">
+          <p class="dialog-note">
+            Share photos with your followers. Media is watermarked per viewer;
+            set a price to publish a paid broadcast.
+          </p>
+
+          <roque-textarea
+            label="Caption"
+            rows="3"
+            placeholder="What are you sharing?"
+            .value="${this.composeCaption}"
+            @aero-input="${this._onComposeCaption}"
+          ></roque-textarea>
+
+          <div class="upload-row">
+            <label class="file-picker" for="composer-files">
+              <span>＋ Add photos</span>
+              <span class="file-hint">JPG · PNG · WEBP · GIF — up to 10 MB each</span>
+            </label>
+            <input
+              id="composer-files"
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              multiple
+              hidden
+              @change="${this._onFilesPicked}"
+            />
+          </div>
+
+          ${this.composePicks.length > 0
+            ? html`<div class="picks">
+                ${this.composePicks.map(
+                  (pick, i) => html`
+                    <div class="pick">
+                      <img src="${pick.preview}" alt="" />
+                      <button
+                        class="pick-remove"
+                        aria-label="Remove photo"
+                        ?disabled="${this.publishing}"
+                        @click="${() => this._removePick(i)}"
+                      >×</button>
+                    </div>
+                  `,
+                )}
+              </div>`
+            : ''}
+
+          <roque-switch
+            label="Paid broadcast — one-time unlock price"
+            .checked="${this.composePaid}"
+            ?disabled="${this.publishing}"
+            @aero-change="${this._onComposePaid}"
+          ></roque-switch>
+
+          ${this.composePaid
+            ? html`<roque-text-field
+                type="number"
+                label="Unlock price (USD)"
+                placeholder="4.99"
+                .value="${this.composePrice}"
+                ?disabled="${this.publishing}"
+                @aero-input="${this._onComposePrice}"
+              ></roque-text-field>`
+            : ''}
+
+          ${this.composeError
+            ? html`<roque-alert
+                type="error"
+                heading="Cannot publish"
+                message="${this.composeError}"
+                @aero-dismiss="${() => (this.composeError = '')}"
+              ></roque-alert>`
+            : ''}
+        </div>
+        <div slot="actions">
+          <roque-button buttonId="compose-cancel" @aero-click="${this._closeComposer}"
+            >Cancel</roque-button
+          >
+          <roque-button
+            context="submit"
+            buttonId="compose-publish"
+            @aero-click="${this._publish}"
+            >${this.publishing ? 'Publishing…' : 'Publish'}</roque-button
+          >
+        </div>
+      </roque-dialog>
+    `
+  }
+
+  // ------------------------------------------------------------------ #
   // Visibility toggle (immediate save, optimistic with revert)
   // ------------------------------------------------------------------ #
 
@@ -417,13 +748,21 @@ export class CreatorContentManager extends LitElement {
           <div>
             <h1>Content</h1>
             <p>
-              Every post and broadcast you've published, with engagement stats.
-              Edit captions, hide content from followers, or delete it entirely.
+              Publish new posts, and manage what you've shared — captions,
+              visibility, paid broadcasts, or deleting it entirely.
             </p>
           </div>
-          <roque-button context="clear" buttonId="content-logout-btn" @aero-click="${this._onLogout}"
-            >Sign out</roque-button
-          >
+          <div class="topbar-actions">
+            <roque-button
+              context="submit"
+              buttonId="new-post-btn"
+              @aero-click="${this._openComposer}"
+              >Publish post</roque-button
+            >
+            <roque-button context="clear" buttonId="content-logout-btn" @aero-click="${this._onLogout}"
+              >Sign out</roque-button
+            >
+          </div>
         </div>
 
         <div class="stats-bar">
@@ -454,13 +793,22 @@ export class CreatorContentManager extends LitElement {
 
         ${this.posts.length === 0
           ? html`<div class="empty">
-              No posts yet — publish your first post or broadcast from the app.
+              No posts yet — publish your first post or broadcast from here.
+              <div class="empty-cta">
+                <roque-button
+                  context="submit"
+                  buttonId="empty-publish"
+                  @aero-click="${this._openComposer}"
+                  >Publish a post</roque-button
+                >
+              </div>
             </div>`
           : html`<div class="grid">
               ${this.posts.map((p) => this._renderCard(p))}
             </div>`}
       </div>
 
+      ${this._renderComposer()}
       ${this._renderEditDialog()}
       ${this._renderDeleteDialog()}
 

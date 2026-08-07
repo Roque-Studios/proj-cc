@@ -76,6 +76,15 @@ export interface TokenResponse {
   refresh_token: string
 }
 
+export interface UserMe {
+  id: number
+  email: string
+  username: string | null
+  role: string
+  is_creator: boolean
+  is_active: boolean
+}
+
 export interface GatewayField {
   name: string
   label: string
@@ -102,7 +111,11 @@ export interface MessagingSettings {
 export interface CreatorMedia {
   id: number
   media_type: string
+  // The real (auth-gated, watermarked) url — null when withheld.
   media_url: string | null
+  // Blurred public preview url — set exactly when media_url is withheld, so
+  // non-followers see the post's shape without the real bytes.
+  preview_url: string | null
 }
 
 export interface CreatorPost {
@@ -168,6 +181,8 @@ export interface LandingProfile {
   display_name: string | null
   bio: string | null
   avatar_url: string | null
+  banner_url: string | null
+  post_count: number
 }
 
 export interface LandingViewer {
@@ -220,6 +235,7 @@ export interface CreatorProfile {
   display_name: string | null
   bio: string | null
   avatar_url: string | null
+  banner_url: string | null
   social_links: Record<string, string> | null
   payout_info: Record<string, unknown> | null
   created_at: string
@@ -297,6 +313,17 @@ export const api = {
     })
   },
 
+  register(email: string, password: string, username?: string): Promise<UserMe> {
+    return request<UserMe>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, username: username || null }),
+    })
+  },
+
+  me(): Promise<UserMe> {
+    return request<UserMe>('/auth/me')
+  },
+
   logout(refreshToken: string): Promise<void> {
     return request<void>('/auth/logout', {
       method: 'POST',
@@ -344,6 +371,21 @@ export const api = {
     return request<void>(`/creator/content/${postId}`, { method: 'DELETE' })
   },
 
+  createCreatorPost(
+    files: File[],
+    caption?: string,
+    priceCents?: number,
+  ): Promise<CreatorPost> {
+    const form = new FormData()
+    for (const file of files) form.append('files', file)
+    const trimmed = (caption ?? '').trim()
+    if (trimmed) form.append('caption', trimmed)
+    if (priceCents != null && priceCents > 0) {
+      form.append('price_cents', String(priceCents))
+    }
+    return request<CreatorPost>('/posts', { method: 'POST', body: form })
+  },
+
   getCreatorSubscribers(
     page: number,
     pageSize: number,
@@ -361,17 +403,50 @@ export const api = {
     return request<CreatorLanding>(`/creators/${creatorId}/landing`)
   },
 
+  // The first (seed) creator — the site-root landing default.
+  getDefaultLanding(): Promise<CreatorLanding> {
+    return request<CreatorLanding>('/creators/default/landing')
+  },
+
   getCreatorProfile(): Promise<CreatorProfile> {
     return request<CreatorProfile>('/creator/profile')
   },
 
   updateCreatorProfile(
-    payload: Partial<Pick<CreatorProfile, 'display_name' | 'bio' | 'avatar_url' | 'social_links'>>,
+    payload: Partial<
+      Pick<CreatorProfile, 'display_name' | 'bio' | 'avatar_url' | 'banner_url' | 'social_links'>
+    >,
   ): Promise<CreatorProfile> {
     return request<CreatorProfile>('/creator/profile', {
       method: 'PUT',
       body: JSON.stringify(payload),
     })
+  },
+
+  uploadCreatorBanner(file: File): Promise<CreatorProfile> {
+    const form = new FormData()
+    form.append('file', file)
+    return request<CreatorProfile>('/creator/banner', {
+      method: 'POST',
+      body: form,
+    })
+  },
+
+  deleteCreatorBanner(): Promise<CreatorProfile> {
+    return request<CreatorProfile>('/creator/banner', { method: 'DELETE' })
+  },
+
+  uploadCreatorAvatar(file: File): Promise<CreatorProfile> {
+    const form = new FormData()
+    form.append('file', file)
+    return request<CreatorProfile>('/creator/avatar', {
+      method: 'POST',
+      body: form,
+    })
+  },
+
+  deleteCreatorAvatar(): Promise<CreatorProfile> {
+    return request<CreatorProfile>('/creator/avatar', { method: 'DELETE' })
   },
 
   getCreatorFeed(creatorId: number, page = 1, pageSize = 10): Promise<FeedResponse> {

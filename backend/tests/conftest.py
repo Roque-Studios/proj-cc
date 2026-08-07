@@ -95,6 +95,12 @@ def _isolated_media_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(
         settings, "ORIGINAL_MEDIA_STORAGE_PATH", str(tmp_path / "media" / "original")
     )
+    monkeypatch.setattr(
+        settings, "BANNER_STORAGE_PATH", str(tmp_path / "media" / "banner")
+    )
+    monkeypatch.setattr(
+        settings, "AVATAR_STORAGE_PATH", str(tmp_path / "media" / "avatar")
+    )
 
 
 @pytest.fixture(autouse=True)

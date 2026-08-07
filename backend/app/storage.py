@@ -97,3 +97,22 @@ def get_original_storage() -> MediaStorage:
     monkeypatch the path without cache invalidation.
     """
     return DiskMediaStorage(settings.ORIGINAL_MEDIA_STORAGE_PATH)
+
+
+def get_banner_storage() -> MediaStorage:
+    """The public banner store (creator hero images on the landing page).
+
+    Unlike the private originals store, banner files are served directly to any
+    visitor via ``GET /media/banner/{key}`` — banners are public by design (a
+    blurred preview protects the *content*, not the profile chrome).
+    """
+    return DiskMediaStorage(settings.BANNER_STORAGE_PATH)
+
+
+def get_avatar_storage() -> MediaStorage:
+    """The public avatar store (creator profile pictures on the landing page).
+
+    Like banners, avatars are public profile chrome served to any visitor via
+    ``GET /media/avatar/{key}``.
+    """
+    return DiskMediaStorage(settings.AVATAR_STORAGE_PATH)

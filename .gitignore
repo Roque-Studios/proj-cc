@@ -16,3 +16,5 @@ nosetests.xml
 coverage.xml
 htmlcov
 .aider*
+
+backend/celerybeat-schedule

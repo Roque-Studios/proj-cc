@@ -163,7 +163,12 @@ export class SubscriberFeedPage extends LitElement {
                       </p>
                       <roque-button
                         buttonId="feed-login"
-                        @aero-click="${() => (window.location.href = '/settings.html')}"
+                        @aero-click="${() =>
+                          (window.location.href =
+                            '/login?next=' +
+                            encodeURIComponent(
+                              window.location.pathname + window.location.search,
+                            ))}"
                         >Log in / Sign up</roque-button
                       >
                     `

@@ -57,8 +57,8 @@ class Settings(BaseSettings):
     # Optional existing catalog product (PROD-...) for billing plans; when
     # empty the bootstrap script (app.payments.bootstrap_paypal) creates one.
     PAYPAL_PRODUCT_ID: str = ""
-    # Wompi (El Salvador) credentials — required when PAYMENT_PROVIDER=wompi.
-    # Wompi SV authenticates with OAuth2 client credentials (App ID / API
+    # Wompi credentials — required when PAYMENT_PROVIDER=wompi.
+    # Wompi authenticates with OAuth2 client credentials (App ID / API
     # Secret). The environment is per-app (each applicativo is marked
     # productivo or not in the panel) rather than a URL switch; the URLs are
     # overridable for test accounts.
@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     # internal service code can read them. Serving watermarks originals on the
     # fly per viewer (see app.watermark), so no served copy is persisted.
     ORIGINAL_MEDIA_STORAGE_PATH: str = "/data/media/original"
+    # Public creator profile images (hero banners + avatars on the landing
+    # page). Unlike the private originals store, these are served to any
+    # visitor (via /media/banner/{key} and /media/avatar/{key}).
+    BANNER_STORAGE_PATH: str = "/data/media/banner"
+    AVATAR_STORAGE_PATH: str = "/data/media/avatar"
     MAX_MEDIA_SIZE_BYTES: int = 10 * 1024 * 1024  # 10 MB per file
     ALLOWED_MEDIA_EXTENSIONS: str = ".jpg,.jpeg,.png,.webp,.gif"
 

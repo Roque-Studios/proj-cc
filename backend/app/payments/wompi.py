@@ -1,14 +1,13 @@
-"""Wompi (El Salvador) payment gateway implementation.
+"""Wompi payment gateway implementation.
 
-Wompi SV is a distinct product from Wompi Colombia: it authenticates with
-**OAuth2 client credentials** (App ID / API Secret) instead of public/private
-keys, and signs webhooks with the ``wompi_hash`` header — the HMAC-SHA256 of
-the **raw** body keyed with the API Secret. The `pywompi` package handles the
-OAuth token caching, the generic authenticated ``request(method, path, json=)``
-(used for every endpoint below), and webhook validation via
-``parse_event(raw_body, received_hash, api_secret)``.
+Wompi authenticates with **OAuth2 client credentials** (App ID / API Secret)
+instead of public/private keys, and signs webhooks with the ``wompi_hash``
+header — the HMAC-SHA256 of the **raw** body keyed with the API Secret. The
+`pywompi` package handles the OAuth token caching, the generic authenticated
+``request(method, path, json=)`` (used for every endpoint below), and webhook
+validation via ``parse_event(raw_body, received_hash, api_secret)``.
 
-Payment model (from the Wompi SV Swagger):
+Payment model (from the Wompi Swagger):
 
 - **Recurring** — ``POST /EnlacePagoRecurrente`` creates a hosted recurring
   payment link (``diaDePago`` = day of month, ``monto``, ``nombre``); the

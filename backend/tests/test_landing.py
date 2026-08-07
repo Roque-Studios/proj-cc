@@ -149,6 +149,51 @@ def test_landing_expired_subscription_is_registered(client, db_session):
     assert resp.json()["viewer"]["level"] == "registered"
 
 
+def test_landing_banner_and_post_count(client):
+    """Landing payload carries the hero banner url + the visible post count."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    creator_headers = _make_creator(client)
+    creator_id = _creator_id(client, creator_headers)
+
+    buf = BytesIO()
+    Image.new("RGB", (8, 8)).save(buf, format="JPEG")
+    jpeg = buf.getvalue()
+    for _ in range(2):
+        resp = client.post(
+            "/posts",
+            headers=creator_headers,
+            files={"files": ("p.jpg", jpeg, "image/jpeg")},
+        )
+        assert resp.status_code == 201
+    # A hidden (soft-archived) post must not count.
+    resp = client.post(
+        "/posts", headers=creator_headers, files={"files": ("h.jpg", jpeg, "image/jpeg")}
+    )
+    hidden_id = resp.json()["id"]
+    assert (
+        client.patch(
+            f"/creator/content/{hidden_id}",
+            headers=creator_headers,
+            json={"is_visible": False},
+        ).status_code
+        == 200
+    )
+    # Upload a banner.
+    resp = client.post(
+        "/creator/banner",
+        headers=creator_headers,
+        files={"file": ("b.jpg", jpeg, "image/jpeg")},
+    )
+    assert resp.status_code == 200
+
+    body = client.get(f"/creators/{creator_id}/landing").json()
+    assert body["profile"]["banner_url"] == f"/media/banner/banner_{creator_id}.jpg"
+    assert body["profile"]["post_count"] == 2
+
+
 def test_landing_404_for_unknown_and_non_creator(client, db_session):
     assert client.get("/creators/999999/landing").status_code == 404
 
@@ -158,6 +203,39 @@ def test_landing_404_for_unknown_and_non_creator(client, db_session):
         plain_id = _user_id(db, "plain@example.com")
     # A registered (non-creator) user is not a landing page.
     assert client.get(f"/creators/{plain_id}/landing").status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Default (seed) creator landing — the site-root fallback
+# --------------------------------------------------------------------------- #
+
+
+def test_default_landing_404_when_no_creator_exists(client, db_session):
+    """No creator accounts yet -> the site root has nothing to show (404)."""
+    assert client.get("/creators/default/landing").status_code == 404
+
+
+def test_default_landing_returns_first_creator(client, db_session):
+    """The default landing is the first (seed) creator, shaped per viewer."""
+    first_headers = _make_creator(client, email="seedcr@example.com")
+    first_id = _creator_id(client, first_headers)
+    # A second creator must not shadow the first/seed creator.
+    _make_creator(client, email="secondcr@example.com")
+
+    resp = client.get("/creators/default/landing")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["profile"]["id"] == first_id
+    assert body["viewer"]["level"] == "anonymous"
+    assert body["viewer"]["user_id"] is None
+
+    # Registered viewers keep their account context on the default landing.
+    _register(client, "fan@example.com")
+    fan_headers = _login(client, "fan@example.com")
+    body = client.get("/creators/default/landing", headers=fan_headers).json()
+    assert body["viewer"]["level"] == "registered"
+    assert body["viewer"]["user_id"] == _user_id(db_session, "fan@example.com")
+    assert body["viewer"]["username"] == "fan"
 
 
 # --------------------------------------------------------------------------- #

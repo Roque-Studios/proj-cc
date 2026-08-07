@@ -109,17 +109,20 @@ def creator_feed(
                         True if post.broadcast_price_cents is not None else None
                     ),
                     include_media_urls=not is_locked,
+                    # Locked broadcasts show a blurred preview until unlocked.
+                    include_preview_urls=is_locked,
                 )
             )
         teaser = False
     else:
-        # Non-follower teaser: metadata only, urls withheld. A paid broadcast
-        # shows its price but stays locked (unlocked=False).
+        # Non-follower teaser: metadata only, real urls withheld — each media
+        # carries a blurred public preview url instead.
         items = [
             build_post_out(
                 post,
                 unlocked=False if post.broadcast_price_cents is not None else None,
                 include_media_urls=False,
+                include_preview_urls=True,
             )
             for post in posts
         ]

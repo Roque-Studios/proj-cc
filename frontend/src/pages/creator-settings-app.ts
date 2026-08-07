@@ -6,22 +6,53 @@ import './creator-gateway-settings.ts'
 import './creator-content.ts'
 import './creator-subscribers.ts'
 import '../components/layouts/tabs.ts'
-import { getAccessToken } from '../lib/api'
+import { api, clearTokens, getAccessToken } from '../lib/api'
 
 /**
- * App shell for the creator admin panel (`/settings.html`).
+ * App shell for the creator admin panel (`/admin`, alias `/settings.html`).
  *
- * Shows the login page until a valid access token is stored, then a tabbed
- * panel: **Settings** (payment gateways + messaging), **Content** (the
- * post/broadcast dashboard) and **Subscribers** (subscriber list + revenue).
- * Logging out (or a 401 from the API) swaps back to login.
+ * Shows the login page until a valid access token for the creator role is
+ * stored, then a tabbed panel: **Settings** (payment gateways + messaging),
+ * **Content** (the post/broadcast dashboard) and **Subscribers** (subscriber
+ * list + revenue). Non-creator accounts are redirected away. Logging out (or
+ * a 401 from the API) swaps back to login.
  */
 @customElement('roque-settings-app')
 export class CreatorSettingsApp extends LitElement {
   @state() private loggedIn = !!getAccessToken()
 
-  private _onLogin() {
-    this.loggedIn = true
+  connectedCallback() {
+    super.connectedCallback()
+    void this._verifyRole()
+  }
+
+  /** Gate the admin panel to the creator role — everyone else goes home. */
+  private async _verifyRole() {
+    if (!getAccessToken()) return
+    try {
+      const me = await api.me()
+      if (!me.is_creator) {
+        clearTokens()
+        window.location.href = '/'
+      }
+    } catch {
+      // Invalid/expired token — request() already cleared it; show login.
+      this.loggedIn = false
+    }
+  }
+
+  private async _onLogin() {
+    try {
+      const me = await api.me()
+      if (!me.is_creator) {
+        clearTokens()
+        window.location.href = '/'
+        return
+      }
+      this.loggedIn = true
+    } catch {
+      this.loggedIn = false
+    }
   }
 
   private _onLogout() {

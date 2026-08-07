@@ -1,6 +1,6 @@
-"""Wompi (El Salvador) integration tests.
+"""Wompi integration tests.
 
-The real Wompi SV API is simulated with ``httpx.MockTransport`` injected into
+The real Wompi API is simulated with ``httpx.MockTransport`` injected into
 ``pywompi.WompiClient(http_client=...)``, so the provider's real request
 building, OAuth2 client-credentials auth, and webhook-signature validation
 (``wompi_hash`` = HMAC-SHA256 of the raw body with the API secret) run against
@@ -49,11 +49,11 @@ WOMPI_CLIENT_SECRET = "wompi_api_secret_test"
 
 
 # --------------------------------------------------------------------------- #
-# A fake Wompi SV sandbox (httpx.MockTransport handler)
+# A fake Wompi sandbox (httpx.MockTransport handler)
 # --------------------------------------------------------------------------- #
 
 class FakeWompiAPI:
-    """In-memory Wompi SV: OAuth, recurring links, tokenized/3DS transactions."""
+    """In-memory Wompi: OAuth, recurring links, tokenized/3DS transactions."""
 
     def __init__(self) -> None:
         self.links: dict[str, dict] = {}
@@ -525,12 +525,12 @@ def test_wompi_charge_3ds_returns_redirect_url():
             "nombre": "Fan",
             "apellido": "Uno",
             "email": "fan@example.com",
-            "ciudad": "San Salvador",
+            "ciudad": "Ciudad de México",
             "direccion": "Av. 1",
-            "idPais": "SV",
-            "idRegion": "SS",
-            "codigoPostal": "1101",
-            "telefono": "+50370000000",
+            "idPais": "MX",
+            "idRegion": "DF",
+            "codigoPostal": "06600",
+            "telefono": "+525512345678",
         },
     )
     assert result.status == "pending"  # completes via webhook after 3DS
@@ -569,7 +569,7 @@ def test_wompi_environment_must_be_sandbox_or_production():
 
 
 # --------------------------------------------------------------------------- #
-# Real sandbox (opt-in — requires a Wompi SV test applicativo)
+# Real sandbox (opt-in — requires a Wompi test applicativo)
 # --------------------------------------------------------------------------- #
 
 _HAS_WOMPI_CREDS = all(

@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.21.0] - 2026-08-07
+### Changed
+- Shared login page copy no longer mentions the creator dashboard (brand line reads "Sign in to subscribe to creators" and the role-redirect hint is gone); the landing page no longer shows a "Creator Landing" brand header
+- Avatars are now uploaded instead of pasting a URL: `POST/DELETE /creator/avatar` (validated, stored in the public avatar store, served via `GET /media/avatar/{key}` with the correct content type) with a roque-* upload UI (preview, replace, remove) in the admin Public profile card
+
+## [0.20.0] - 2026-08-07
+### Added
+- Redesigned frontpage hero: uploaded banner image (admin `POST/DELETE /creator/banner` → public `GET /media/banner/{key}`), avatar, display name with a green online dot, visible post count, bio, social chips and role-based CTAs — anonymous visitors get a "Join free" button (free account creation, then the existing paywall), registered non-followers Subscribe, followers a subscriber welcome
+- Blurred post previews for non-followers / locked broadcasts: `GET /preview/{post_id}/media` serves a server-blurred, `PREVIEW`-stamped transform of post media to any visitor; feed items carry `preview_url` whenever the real `media_url` is withheld, and the landing page always shows the posts grid (full for followers, blurred teasers otherwise)
+- Landing payload grows `banner_url` + `post_count` (visible posts only); admin Settings gains a Public profile card (display name, bio, avatar url, banner upload/remove)
+
+## [0.19.0] - 2026-08-07
+### Added
+- Admin Content tab can now publish posts: a "Publish post" composer (caption + multi-photo picker with previews + optional one-time unlock price for paid broadcasts) uploads through the existing `POST /posts` multipart endpoint and drops the new post straight into the dashboard list
+
+## [0.18.0] - 2026-08-06
+### Added
+- Shared sign-in page (`login.html` + `roque-login-page`) at `/login` for every role, with role-based redirects after sign-in: creators → the `/admin` dashboard, members → back to their `?next=` target (or the site root). Includes a built-in "create an account" flow (`POST /auth/register` + auto sign-in)
+- Admin dashboard now lives at a clean `/admin` URL (`admin.html`; `/settings.html` remains an alias) and is gated to the creator role — the app shell checks `GET /auth/me` on load and after login, redirecting non-creators away
+- Landing, subscriber-feed and checkout CTAs now point at `/login?next=…` instead of the old `/settings.html` login entry
+- Site root `/` now falls back to the **first/seed creator** (`GET /creators/default/landing`) instead of always showing the empty state; `404` (no creators yet) keeps the empty state
+
 ## [0.17.0] - 2026-08-06
 ### Added
 - DM / chat UI (mobile-first): `chat.html` + `roque-dm-chat` at `/chat` (nginx `/chat/…` + Vite multi-page input) — inbox from `GET /conversations` (other party + last-message preview), thread view with **paginated** history (`GET /conversations/{id}/messages?limit=&before_id=` — latest page first, scroll-to-top loads older pages via the id cursor with the scroll anchor preserved), and real-time delivery over `WS /api/ws/dms?token=…`
@@ -29,7 +51,7 @@
 ### Added
 - Public creator landing page: `GET /creators/{id}/landing` (public, no auth) returns the creator's public profile (display name, bio, avatar), their social accounts, the **requesting viewer's** access level (anonymous / registered / follower — via the shared access resolver, so expired subscriptions revert to registered), and the creator's enabled checkout gateways
 - `CreatorProfile.social_links` (JSON: twitter/instagram/tiktok/other handles or urls) + migration `5e6f7a8b9c0d`; editable via `PUT /creator/profile` (unknown platforms rejected; empty values remove a link) and shown on the landing page to every visitor
-- Frontend: `landing.html` + `roque-creator-landing` (roque-* only, mobile-first) at `/creator/{id}` (nginx maps the path; Vite multi-page input): profile header with avatar/bio, social link chips (new `x`/`link`/`lock` icons), and role-based content — anonymous sees a login-to-subscribe prompt, registered non-followers see account context + subscribe button (opens the hosted checkout for the creator's enabled gateways), followers get the full feed with watermarked thumbnails and locked/price badges on paid broadcasts
+- Frontend: `index.html` (the Vite main entry, served at `/` and `/creator/{id}` via nginx) + `roque-creator-landing` (roque-* only, mobile-first): profile header with avatar/bio, social link chips (new `x`/`link`/`lock` icons), and role-based content — anonymous sees a login-to-subscribe prompt, registered non-followers see account context + subscribe button (opens the hosted checkout for the creator's enabled gateways), followers get the full feed with watermarked thumbnails and locked/price badges on paid broadcasts
 - Settings panel: a "Public profile & social links" card to edit the landing page's social accounts
 - Coverage: `backend/tests/test_landing.py` (7 tests: anonymous/registered/follower/expired landing states, 404s, social-links roundtrip + unknown-platform rejection + only-configured-accounts exposure)
 
@@ -86,7 +108,7 @@
 
 ## [0.7.0] - 2026-08-06
 ### Added
-- Wompi (El Salvador) payment integration via `pywompi` (OAuth2 client-credentials auth): per-subscription recurring payment links (`EnlacePagoRecurrente`, monthly charge on `WOMPI_DIA_DE_PAGO`, hosted checkout with 3DS handled on Wompi's page)
+- Wompi payment integration via `pywompi` (OAuth2 client-credentials auth): per-subscription recurring payment links (`EnlacePagoRecurrente`, monthly charge on `WOMPI_DIA_DE_PAGO`, hosted checkout with 3DS handled on Wompi's page)
 - Webhook validation with Wompi's `wompi_hash` header (HMAC-SHA256 of the raw body with the API secret) via `pywompi.parse_event`; `APROBADA` activates the subscription (email-matched across non-terminal statuses; the link id stays the cancel ref), `RECHAZADA` → `past_due`
 - One-time charges: tokenized card without 3DS (`TransaccionCompra/TokenizadaSin3Ds`) + 3DS redirect flow (`TransaccionCompra/3Ds` → `urlCompletarPago3Ds`)
 - `WebhookEvent.customer_email` + email-fallback reconciliation in `SubscriptionService` (gateway-agnostic; also benefits future gateways whose events don't reference stored refs); `ChargeRequest.payment_method_token`

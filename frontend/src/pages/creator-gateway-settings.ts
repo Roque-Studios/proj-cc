@@ -3,9 +3,11 @@ import { customElement, state } from 'lit/decorators.js'
 
 import '../components/inputs/switch.ts'
 import '../components/inputs/text-field.ts'
+import '../components/inputs/textarea.ts'
 import '../components/inputs/select.ts'
 import '../components/buttons/button.ts'
 import '../components/layouts/card.ts'
+import '../components/data/avatar.ts'
 import '../components/layouts/divider.ts'
 import '../components/feedback/toast.ts'
 import '../components/feedback/alert.ts'
@@ -35,7 +37,15 @@ export class CreatorGatewaySettings extends LitElement {
   @state() private toast = ''
   @state() private toastHeading = ''
   @state() private toastVisible = false
-  // Public profile: social accounts shown on the creator landing page.
+  // Public profile: the landing page hero (name/bio/avatar/banner) + social
+  // accounts shown on the creator landing page.
+  @state() private displayName = ''
+  @state() private bio = ''
+  @state() private avatarUrl = ''
+  @state() private bannerUrl = ''
+  @state() private profileBusy = false
+  @state() private bannerBusy = false
+  @state() private avatarBusy = false
   @state() private socialForm: Record<string, string> = {}
   @state() private socialBusy = false
 
@@ -149,6 +159,61 @@ export class CreatorGatewaySettings extends LitElement {
       padding: 30px;
       text-align: center;
     }
+
+    /* --- Public profile (landing hero) --- */
+    .avatar-zone {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .avatar-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .avatar-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .banner-zone {
+      margin-top: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .banner-preview {
+      width: 100%;
+      max-height: 140px;
+      border: 1px solid #c8d4de;
+      border-radius: 4px;
+      overflow: hidden;
+      background: #eef3f7;
+    }
+
+    .banner-preview img {
+      display: block;
+      width: 100%;
+      max-height: 140px;
+      object-fit: cover;
+    }
+
+    .banner-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    roque-button.danger::part(aero-btn) {
+      background: linear-gradient(to bottom, #fdf2f2 0%, #f6c9cc 100%);
+      background-color: rgba(220, 90, 90, 0.25);
+      outline-color: rgba(160, 40, 40, 0.5);
+    }
   `
 
   async connectedCallback() {
@@ -166,6 +231,10 @@ export class CreatorGatewaySettings extends LitElement {
         api.getCreatorProfile(),
       ])
       this.messagingOn = messaging.allow_messages_from_all_followers
+      this.displayName = profile.display_name ?? ''
+      this.bio = profile.bio ?? ''
+      this.avatarUrl = profile.avatar_url ?? ''
+      this.bannerUrl = profile.banner_url ?? ''
       this.socialForm = {
         twitter: profile.social_links?.twitter ?? '',
         instagram: profile.social_links?.instagram ?? '',
@@ -311,6 +380,117 @@ export class CreatorGatewaySettings extends LitElement {
     }
   }
 
+  private async _saveProfile() {
+    if (this.profileBusy) return
+    this.profileBusy = true
+    this.error = ''
+    try {
+      // The avatar is server-managed via its own upload endpoint — it is not
+      // sent here, so an edit never stomps the uploaded file.
+      const updated = await api.updateCreatorProfile({
+        display_name: this.displayName.trim() || null,
+        bio: this.bio.trim() || null,
+      })
+      this.bannerUrl = updated.banner_url ?? ''
+      this.avatarUrl = updated.avatar_url ?? ''
+      this.toastHeading = 'Profile saved'
+      this.toast = 'Your public profile is updated on the landing page hero.'
+      this._showToast()
+    } catch (err) {
+      this._handleError(err)
+    } finally {
+      this.profileBusy = false
+    }
+  }
+
+  private _pickAvatar() {
+    if (this.avatarBusy) return
+    const input = this.shadowRoot?.querySelector<HTMLInputElement>('#avatar-file')
+    input?.click()
+  }
+
+  private async _onAvatarPicked(e: Event) {
+    if (this.avatarBusy) return
+    const input = e.target as HTMLInputElement
+    const file = input.files?.[0]
+    input.value = '' // allow re-picking the same file
+    if (!file) return
+    this.avatarBusy = true
+    this.error = ''
+    try {
+      const updated = await api.uploadCreatorAvatar(file)
+      this.avatarUrl = updated.avatar_url ?? ''
+      this.toastHeading = 'Avatar uploaded'
+      this.toast = 'Your new avatar is live on your public landing page.'
+      this._showToast()
+    } catch (err) {
+      this._handleError(err)
+    } finally {
+      this.avatarBusy = false
+    }
+  }
+
+  private async _removeAvatar() {
+    if (this.avatarBusy) return
+    this.avatarBusy = true
+    this.error = ''
+    try {
+      const updated = await api.deleteCreatorAvatar()
+      this.avatarUrl = updated.avatar_url ?? ''
+      this.toastHeading = 'Avatar removed'
+      this.toast = 'Your landing page now uses the initial-letter fallback.'
+      this._showToast()
+    } catch (err) {
+      this._handleError(err)
+    } finally {
+      this.avatarBusy = false
+    }
+  }
+
+  private _pickBanner() {
+    if (this.bannerBusy) return
+    const input = this.shadowRoot?.querySelector<HTMLInputElement>('#banner-file')
+    input?.click()
+  }
+
+  private async _onBannerPicked(e: Event) {
+    if (this.bannerBusy) return
+    const input = e.target as HTMLInputElement
+    const file = input.files?.[0]
+    input.value = '' // allow re-picking the same file
+    if (!file) return
+    this.bannerBusy = true
+    this.error = ''
+    try {
+      const updated = await api.uploadCreatorBanner(file)
+      this.bannerUrl = updated.banner_url ?? ''
+      this.toastHeading = 'Banner uploaded'
+      this.toast = 'Your new banner is live on your public landing page.'
+      this._showToast()
+    } catch (err) {
+      this._handleError(err)
+    } finally {
+      this.bannerBusy = false
+    }
+  }
+
+  private async _removeBanner() {
+    if (this.bannerBusy) return
+    this.bannerBusy = true
+    this.error = ''
+    try {
+      const updated = await api.deleteCreatorBanner()
+      this.bannerUrl = updated.banner_url ?? ''
+      this.toastHeading = 'Banner removed'
+      this.toast = 'Your landing page now uses the default gradient banner.'
+      this._showToast()
+    } catch (err) {
+      this._handleError(err)
+    } finally {
+      this.bannerBusy = false
+    }
+  }
+
   private _onSocialField(platform: string, value: string) {
     this.socialForm = { ...this.socialForm, [platform]: value }
   }
@@ -397,11 +577,125 @@ export class CreatorGatewaySettings extends LitElement {
             ></roque-alert>`
           : ''}
 
-        <roque-card heading="Public profile & social links">
+        <roque-card heading="Public profile">
           <p class="desc">
-            These accounts are shown on your public landing page
-            (<code>/creator/{id}</code>) for every visitor, before they
-            subscribe. Leave a field empty to hide that platform.
+            This is the hero of your public landing page
+            (<code>/creator/{id}</code>) — the name, online dot, post count,
+            bio and banner are shown to every visitor before they subscribe.
+          </p>
+          <div style="margin-bottom: 10px">
+            <roque-text-field
+              label="Display name"
+              placeholder="Your name"
+              .value="${this.displayName}"
+              @aero-input="${(e: CustomEvent) =>
+                (this.displayName = e.detail?.value ?? '')}"
+            ></roque-text-field>
+          </div>
+          <div style="margin-bottom: 10px">
+            <roque-textarea
+              label="Bio"
+              rows="3"
+              placeholder="Tell visitors who you are"
+              .value="${this.bio}"
+              @aero-input="${(e: CustomEvent) => (this.bio = e.detail?.value ?? '')}"
+            ></roque-textarea>
+          </div>
+
+          <div class="avatar-zone">
+            <div class="avatar-row">
+              <roque-avatar
+                src="${this.avatarUrl}"
+                alt="${this.displayName || 'Avatar'}"
+                size="64"
+              ></roque-avatar>
+              <div class="avatar-actions">
+                <roque-button
+                  buttonId="pick-avatar"
+                  ?disabled="${this.avatarBusy}"
+                  @aero-click="${this._pickAvatar}"
+                  >${this.avatarBusy
+                    ? 'Uploading…'
+                    : this.avatarUrl
+                      ? 'Replace avatar'
+                      : 'Upload avatar'}</roque-button
+                >
+                ${this.avatarUrl
+                  ? html`<roque-button
+                      buttonId="remove-avatar"
+                      class="danger"
+                      ?disabled="${this.avatarBusy}"
+                      @aero-click="${this._removeAvatar}"
+                      >Remove</roque-button
+                    >`
+                  : ''}
+              </div>
+            </div>
+            <p class="desc">
+              Your profile picture on the landing page hero. JPG · PNG · WEBP ·
+              GIF.
+            </p>
+            <input
+              id="avatar-file"
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              hidden
+              @change="${this._onAvatarPicked}"
+            />
+          </div>
+
+          <div class="banner-zone">
+            ${this.bannerUrl
+              ? html`<div class="banner-preview">
+                  <img src="${this.bannerUrl}" alt="Banner preview" />
+                </div>`
+              : html`<p class="desc">No banner yet — upload one for your hero.</p>`}
+            <div class="banner-actions">
+              <roque-button
+                buttonId="pick-banner"
+                ?disabled="${this.bannerBusy}"
+                @aero-click="${this._pickBanner}"
+                >${this.bannerBusy
+                  ? 'Uploading…'
+                  : this.bannerUrl
+                    ? 'Replace banner'
+                    : 'Upload banner'}</roque-button
+              >
+              ${this.bannerUrl
+                ? html`<roque-button
+                    buttonId="remove-banner"
+                    class="danger"
+                    ?disabled="${this.bannerBusy}"
+                    @aero-click="${this._removeBanner}"
+                    >Remove</roque-button
+                  >`
+                : ''}
+            </div>
+            <input
+              id="banner-file"
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              hidden
+              @change="${this._onBannerPicked}"
+            />
+          </div>
+
+          <div class="footer-row">
+            <span class="summary-label">Shown on the landing page hero.</span>
+            <roque-button
+              context="submit"
+              buttonId="save-profile"
+              ?disabled="${this.profileBusy}"
+              @aero-click="${this._saveProfile}"
+              >${this.profileBusy ? 'Saving…' : 'Save profile'}</roque-button
+            >
+          </div>
+        </roque-card>
+
+        <roque-card heading="Social links">
+          <p class="desc">
+            These accounts are shown under your profile for every visitor.
+            Leave a field empty to hide that platform.
           </p>
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px">
             ${(['twitter', 'instagram', 'tiktok', 'other'] as const).map(

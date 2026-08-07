@@ -1,9 +1,12 @@
-"""Public creator landing page endpoint.
+"""Public creator landing page endpoints.
 
 ``GET /creators/{creator_id}/landing`` is the single payload behind the public
 creator landing page: the creator's public identity (display name, bio,
 avatar) with their social accounts, the **requesting viewer's** access level
 for this creator, and the payment gateways the subscribe CTA can offer.
+
+``GET /creators/default/landing`` serves the same payload for the first
+(seed) creator — the site-root default when no creator id is in the URL.
 
 The viewer state drives the page's role-based content:
 
@@ -15,20 +18,26 @@ The viewer state drives the page's role-based content:
   (``GET /creators/{creator_id}/posts`` already returns full posts for
   followers and teasers for everyone else).
 
-The endpoint itself is public (no auth required): anonymous requests simply
-resolve to the anonymous level. It never leaks subscriber data — only the
+The endpoints are public (no auth required): anonymous requests simply
+resolve to the anonymous level. They never leak subscriber data — only the
 public profile fields and the creator's *enabled* gateways.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..access import ViewerAccessLevel, ViewerContext, resolve_viewer_access
+from ..access import (
+    ViewerAccessLevel,
+    ViewerContext,
+    resolve_viewer_access,
+    resolve_viewer_context,
+)
 from ..database import get_db
 from ..gateways import GATEWAYS
-from ..models import User, UserRole
+from ..models import Post, User, UserRole
 from ..schemas import (
     CheckoutGatewayOut,
     CreatorLandingOut,
@@ -58,6 +67,80 @@ def _social_links(profile) -> list[SocialLinkOut]:
     ]
 
 
+def _landing_payload(
+    creator: User,
+    ctx: ViewerContext,
+    db: Session,
+) -> CreatorLandingOut:
+    """Build the landing payload for one creator, shaped for the viewer."""
+    profile = creator.creator_profile
+    gateways = [
+        CheckoutGatewayOut(gateway=gateway, label=GATEWAYS[gateway].label)
+        for gateway, _row in enabled_configured_gateways(db, creator.id)
+    ]
+
+    level = ctx.level.value
+    subscription = None
+    if ctx.level == ViewerAccessLevel.follower and ctx.subscription is not None:
+        subscription = ctx.subscription.status.value
+
+    # Visible posts only — hidden (soft-archived) posts never count toward the
+    # hero's post count (same rule as the feed).
+    post_count = (
+        db.scalar(
+            select(func.count())
+            .select_from(Post)
+            .where(Post.creator_id == creator.id, Post.is_visible.is_(True))
+        )
+        or 0
+    )
+
+    return CreatorLandingOut(
+        profile=CreatorLandingProfileOut(
+            id=creator.id,
+            username=creator.username,
+            display_name=profile.display_name if profile else None,
+            bio=profile.bio if profile else None,
+            avatar_url=profile.avatar_url if profile else None,
+            banner_url=profile.banner_url if profile else None,
+            post_count=post_count,
+        ),
+        social_links=_social_links(profile) if profile else [],
+        viewer=ViewerLandingOut(
+            level=level,
+            user_id=ctx.user.id if ctx.user else None,
+            username=ctx.user.username if ctx.user else None,
+            subscription=subscription,
+        ),
+        gateways=gateways,
+    )
+
+
+@router.get("/default/landing", response_model=CreatorLandingOut)
+def default_creator_landing(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Landing payload for the first (seed) creator — the site-root default.
+
+    The site root ``/`` (no creator id in the URL) shows this creator's
+    landing page; ``404`` when no creator account exists yet.
+    """
+    creator = db.scalar(
+        select(User)
+        .where(User.role == UserRole.creator, User.is_active.is_(True))
+        .order_by(User.id.asc())
+        .limit(1)
+    )
+    if creator is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No creator configured yet",
+        )
+    ctx = resolve_viewer_context(request, creator.id, db)
+    return _landing_payload(creator, ctx, db)
+
+
 @router.get("/{creator_id}/landing", response_model=CreatorLandingOut)
 def creator_landing(
     creator_id: int,
@@ -71,32 +154,4 @@ def creator_landing(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Creator not found",
         )
-
-    profile = creator.creator_profile
-    gateways = [
-        CheckoutGatewayOut(gateway=gateway, label=GATEWAYS[gateway].label)
-        for gateway, _row in enabled_configured_gateways(db, creator_id)
-    ]
-
-    level = ctx.level.value
-    subscription = None
-    if ctx.level == ViewerAccessLevel.follower and ctx.subscription is not None:
-        subscription = ctx.subscription.status.value
-
-    return CreatorLandingOut(
-        profile=CreatorLandingProfileOut(
-            id=creator.id,
-            username=creator.username,
-            display_name=profile.display_name if profile else None,
-            bio=profile.bio if profile else None,
-            avatar_url=profile.avatar_url if profile else None,
-        ),
-        social_links=_social_links(profile) if profile else [],
-        viewer=ViewerLandingOut(
-            level=level,
-            user_id=ctx.user.id if ctx.user else None,
-            username=ctx.user.username if ctx.user else None,
-            subscription=subscription,
-        ),
-        gateways=gateways,
-    )
+    return _landing_payload(creator, ctx, db)

@@ -99,9 +99,14 @@ export class SubscribeCheckoutPage extends LitElement {
   }
 
   private async _resolve() {
-    // Subscribing requires an account.
+    // Subscribing requires an account — send anonymous visitors to sign in,
+    // then bring them straight back here (role redirect may take creators to
+    // /admin instead).
     if (!getAccessToken()) {
-      window.location.href = '/settings.html'
+      const next = encodeURIComponent(
+        window.location.pathname + window.location.search,
+      )
+      window.location.href = `/login?next=${next}`
       return
     }
     const params = new URLSearchParams(window.location.search)

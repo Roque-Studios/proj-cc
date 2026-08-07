@@ -45,9 +45,10 @@ a clear error** if any required variable is missing or empty.
 | `PAYMENT_PROVIDER` | `mock` | Active payment gateway: `mock`, `stripe`, or `paypal`. Switching is a config change only — the subscription business logic is gateway-agnostic |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_API_BASE` | empty / Stripe base | Stripe credentials — required when `PAYMENT_PROVIDER=stripe` |
 | `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` / `PAYPAL_WEBHOOK_ID` / `PAYPAL_ENVIRONMENT` / `PAYPAL_PRODUCT_ID` | empty / `sandbox` / empty | PayPal credentials — required when `PAYMENT_PROVIDER=paypal`. `PAYPAL_ENVIRONMENT` is `sandbox` or `live`; `PAYPAL_PRODUCT_ID` optionally pins the catalog product billing plans attach to |
-| `WOMPI_CLIENT_ID` / `WOMPI_CLIENT_SECRET` / `WOMPI_ENVIRONMENT` / `WOMPI_API_BASE_URL` / `WOMPI_TOKEN_URL` / `WOMPI_DIA_DE_PAGO` / `WOMPI_3DS_REDIRECT_URL` | empty / `sandbox` / SV URLs / `1` / empty | Wompi (El Salvador) credentials — required when `PAYMENT_PROVIDER=wompi`. Environment is per-app (each applicativo is marked sandbox/production in the panel), not a URL switch; `WOMPI_DIA_DE_PAGO` is the monthly charge day; `WOMPI_3DS_REDIRECT_URL` is the post-3DS return URL |
+| `WOMPI_CLIENT_ID` / `WOMPI_CLIENT_SECRET` / `WOMPI_ENVIRONMENT` / `WOMPI_API_BASE_URL` / `WOMPI_TOKEN_URL` / `WOMPI_DIA_DE_PAGO` / `WOMPI_3DS_REDIRECT_URL` | empty / `sandbox` / Wompi API URLs / `1` / empty | Wompi credentials — required when `PAYMENT_PROVIDER=wompi`. Environment is per-app (each applicativo is marked sandbox/production in the panel), not a URL switch; `WOMPI_DIA_DE_PAGO` is the monthly charge day; `WOMPI_3DS_REDIRECT_URL` is the post-3DS return URL |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` / `SMTP_TLS` | empty / `587` / … / `true` | Optional SMTP for payment-failure notifications. When `SMTP_HOST` is empty the notify task degrades to a structured log (dev/mock setups) |
 | `ORIGINAL_MEDIA_STORAGE_PATH` / `MAX_MEDIA_SIZE_BYTES` / `ALLOWED_MEDIA_EXTENSIONS` | `/data/media/original` / `10485760` / `.jpg,.jpeg,.png,.webp,.gif` | Where **private unwatermarked originals** live (never served directly — only internal code reads them; `GET /content/{post_id}/media?media_id={id}` serves the original **watermarked on the fly** to the post's creator or an active follower), the per-file size cap, and allowed extensions |
+| `BANNER_STORAGE_PATH` / `AVATAR_STORAGE_PATH` | `/data/media/banner` / `/data/media/avatar` | Where **public creator profile images** live — hero banners and avatars uploaded from the admin dashboard, served to any visitor via `GET /media/banner/{key}` / `GET /media/avatar/{key}` (content type follows the uploaded extension) |
 
 ### Security
 
@@ -76,7 +77,7 @@ provider; business logic independent of any real gateway).
 All payment flows go through the `PaymentProvider` interface in
 `backend/app/payments/base.py` (create customer, create/cancel subscription,
 verify webhook, charge one-time). Implementations: `mock` (in-memory, default),
-`stripe`, `paypal` (httpx-based) and `wompi` (Wompi El Salvador, via the
+`stripe`, `paypal` (httpx-based) and `wompi` (via the
 `pywompi` package). `backend/app/services/subscriptions.py` is the only place
 that orchestrates the subscription lifecycle, and it depends **only** on the
 interface — so adding a gateway is a one-line registration in
@@ -117,8 +118,9 @@ gateway, backend-only, hidden from the settings UI).
   then each creator's stored config — so an event signed with a creator's own
   webhook secret reconciles. A forged event fails all candidates → `400`.
 
-**Admin page (frontend)** — the settings view lives at `/settings.html` (built
-from the `roque-*` components: cards, switches, text fields, badges, toasts):
+**Admin page (frontend)** — the admin dashboard lives at `/admin` (built
+from the `roque-*` components: cards, switches, text fields, badges, toasts;
+`/settings.html` remains a working alias):
 
 1. Seed the creator (admin) account once — this platform treats the creator
    role as the admin role:
@@ -127,11 +129,11 @@ from the `roque-*` components: cards, switches, text fields, badges, toasts):
    docker compose exec api python -m app.seed_creator --email admin@you.io --password 'S3cret!'
    ```
 
-2. Visit `http://localhost/settings.html` **directly** — the page is not
-   linked from anywhere (by design) and only reachable by typing its URL.
-3. Sign in with the seeded account, then toggle Stripe / PayPal / Wompi and
-   enter each gateway's credentials. A gateway's switch stays disabled until
-   its required config is complete (the backend enforces the same rule).
+2. Visit `http://localhost/admin` and sign in with the seeded account. The
+   panel is gated to the creator role — a regular account is redirected away.
+3. Toggle Stripe / PayPal / Wompi and enter each gateway's credentials. A
+   gateway's switch stays disabled until its required config is complete (the
+   backend enforces the same rule).
 
 The frontend uses a token-based fetch client (`frontend/src/lib/api.ts`,
 Bearer access token in localStorage); in dev, `yarn dev` proxies `/api/*` to
@@ -145,7 +147,8 @@ rejection).
 ### Photo posts (creator uploads)
 
 `POST /api/posts` — creator-only (`403` for registered users) multipart upload
-with an optional `caption` and **one or more** image files. Every file is
+with an optional `caption` and **one or more** image files (the admin
+Content tab's Publish-post composer is the UI for it). Every file is
 validated before anything is persisted: extension in the allowed set, declared
 `Content-Type` is `image/*`, **magic bytes** match (spoof-proof, and the
 sniffed type is authoritative over the extension), and the size cap
@@ -372,14 +375,16 @@ working.
 **Frontend** — the admin panel at `/settings.html` is now tabbed: **Settings**
 (gateways + messaging) and a mobile-first **Content** tab (built from the
 `roque-*` components — cards, badges, switches, textarea, dialog, toast): a
-stats bar (posts / views / unlocks), stacked post cards with watermarked
-thumbnails (fetched with the access token via `?token=`, the `<img>`
-mechanism), paid-broadcast + hidden badges, an edit dialog (caption +
-visibility), a delete confirmation, and an immediate-save visibility switch
-that reverts on error. Covered by `backend/tests/test_creator_content.py`
-(role gates, listing + stats, unlock counts incl. refunds, view counting,
-caption edits, visibility gating across feed/media/unlock, and delete
-cleaning rows + storage).
+**publish composer** (caption + multi-photo picker with previews + optional
+one-time unlock price for paid broadcasts, posted to `POST /posts`), a stats
+bar (posts / views / unlocks), stacked post cards with watermarked thumbnails
+(fetched with the access token via `?token=`, the `<img>` mechanism),
+paid-broadcast + hidden badges, an edit dialog (caption + visibility), a
+delete confirmation, and an immediate-save visibility switch that reverts on
+error. Covered by `backend/tests/test_creator_content.py` (role gates,
+listing + stats, unlock counts incl. refunds, view counting, caption edits,
+visibility gating across feed/media/unlock, and delete cleaning rows +
+storage).
 
 ### Subscriber management + revenue
 
@@ -422,25 +427,41 @@ in `backend/tests/test_wompi_integration.py`.
 ### Public creator landing page
 
 `GET /api/creators/{creator_id}/landing` (public, no auth needed) powers the
-creator's public landing page at `/creator/{id}` (nginx serves `landing.html`
-there). It returns the creator's **public** identity — display name, bio,
-avatar — plus their social accounts and the payment gateways enabled for
-checkout, together with the **requesting viewer's** access level:
+creator's public landing page at `/creator/{id}` (nginx serves `index.html`
+there). Visiting the site root `/` with no creator id falls back to
+`GET /api/creators/default/landing` — the **first/seed creator** — so a
+single-creator platform can point its homepage straight at the creator (a
+`404` before any creator exists shows an empty state). It returns the
+creator's **public** identity — display name, bio, avatar, hero banner and
+visible **post count** — plus their social accounts and the payment gateways
+enabled for checkout, together with the **requesting viewer's** access level:
 
-- **anonymous** → the page shows the subscribe prompt only (a login link,
-  since subscribing requires an account);
-- **registered (non-follower)** → the same prompt plus account context (who
-  is logged in) and a subscribe button that opens the hosted checkout (the
+- **anonymous** → a hero with a **"Join free"** button — creating a free
+  account (the existing `/login` register flow), after which the paywall is
+  the subscription tier;
+- **registered (non-follower)** → the same hero plus account context (who is
+  logged in) and a **Subscribe** button that opens the hosted checkout (the
   existing `POST /subscribe` flow, resolving strictly from the creator's
   enabled gateways);
-- **follower** → the profile plus the **full feed** (`GET
-  /creators/{id}/posts` already returns full posts for followers, teasers for
-  everyone else, and excludes hidden posts); paid broadcasts show their price
-  and a locked badge until unlocked.
+- **follower** → the hero with a subscriber welcome.
+
+Every visitor also gets the **posts grid** below the hero: followers see the
+full feed (`GET /creators/{id}/posts` returns full posts with watermarked
+thumbnails), everyone else sees the same posts as **blurred previews** (see
+*Blurred previews* below) — the real bytes are never exposed.
 
 Classification is the shared viewer access resolver, so an expired
 subscription reverts to the registered view. The landing endpoint itself
 never leaks subscriber data — only public profile fields and enabled gateways.
+
+**Hero banner & avatar** — the creator uploads both from the admin dashboard
+(`POST /creator/banner` / `POST /creator/avatar`, creator-only, validated like
+post media; the files land in the public profile-image stores and
+`CreatorProfile.banner_url` / `avatar_url` point at `GET /media/banner/{key}` /
+`GET /media/avatar/{key}`, served to any visitor). The `DELETE` variants
+remove them (the frontend falls back to a gradient banner / initial-letter
+avatar). The same admin card edits display name and bio via
+`PUT /creator/profile`.
 
 **Social accounts** — `CreatorProfile.social_links` (JSON dict of
 `twitter` / `instagram` / `tiktok` / `other` handles or urls) is editable by
@@ -450,11 +471,24 @@ frontend only ever navigates to `http(s)` urls from stored values, so a
 stored link can't be an XSS vector.
 
 The page is built mobile-first from the `roque-*` components (avatar, card,
-badge, button, icon) and is a Vite multi-page entry alongside `index.html` /
-`settings.html`. Covered by `backend/tests/test_landing.py` (anonymous /
-registered / follower / expired states, 404s, social-links roundtrip +
-validation + exposure) and the role-by-role feed tests in
-`backend/tests/test_feed.py`.
+badge, button, icon) and is the Vite main entry (`index.html`) alongside
+`settings.html` / `feed.html` / `checkout.html` / `chat.html`. Covered by `backend/tests/test_landing.py` (anonymous /
+registered / follower / expired states, 404s, banner + post-count payload,
+social-links roundtrip + validation + exposure) and the role-by-role feed
+tests in `backend/tests/test_feed.py`.
+
+**Blurred previews (non-followers / locked broadcasts)** — `GET
+/preview/{post_id}/media?media_id={id}` serves a **blurred, `PREVIEW`-stamped
+transform** of a post's media to *any* visitor (no auth): the image is heavily
+gaussian-blurred with a diagonal `PREVIEW` label (deterministic,
+viewer-independent, cached once per media file), so visitors see the shape of
+the content without anything usable leaking. Hidden posts and media that
+doesn't belong to the post `404` exactly like the authenticated endpoint. The
+feed wires these urls: every media item on a non-follower teaser (and on a
+paid broadcast a follower hasn't unlocked) carries `preview_url` while the
+real `media_url` stays withheld — the subscriber feed renders them as blurred
+thumbnails (locked broadcasts show the one-time price + unlock CTA over the
+blur).
 
 ### Subscriber feed view (frontend)
 
@@ -482,6 +516,23 @@ same component instead of its old inline simplified feed. Backend coverage of
 the lock → unlock → full-access flow (incl. refunds re-locking) is in
 `backend/tests/test_broadcast.py`; the feed role-by-role tests are in
 `backend/tests/test_feed.py`.
+
+### Sign in & accounts (shared `/login`)
+
+One shared sign-in page (`login.html`, nginx `/login`) serves every role —
+creators and followers use the same account system (`POST /auth/login`,
+`GET /auth/me`). After sign-in the page redirects **by role**: creators go to
+the `/admin` dashboard, everyone else returns to the page they came from
+(an optional safe `?next=` target, or the site root). A small "create an
+account" flow (`POST /auth/register`) is built into the same page, so a
+new follower can register and subscribe without leaving the flow. The
+landing page's "Log in to subscribe" CTA, the subscriber-feed prompt and the
+anonymous checkout redirect all point here with `?next=` set, so a follower
+signs in and lands right back where they were.
+
+In the Vite dev server the clean URLs fall back to the landing page (same as
+`/checkout` / `/feed` / `/chat`) — use `/login.html` and `/admin.html`
+directly in dev; nginx maps the clean `/login` / `/admin` URLs in production.
 
 ### Subscribe / checkout UI
 
@@ -576,11 +627,11 @@ test (`test_paypal_sandbox_subscribe_flow`) runs only when `PAYPAL_CLIENT_ID` /
 sandbox, printing the approve link (the buyer's approval is a hosted,
 human step — webhook reconciliation is covered by the simulated tests).
 
-### Wompi (El Salvador) subscriptions
+### Wompi subscriptions
 
 Set `PAYMENT_PROVIDER=wompi` with `WOMPI_CLIENT_ID` / `WOMPI_CLIENT_SECRET`
-from a Wompi Commerce applicativo (El Salvador). Wompi SV authenticates with
-**OAuth2 client credentials** (not the public/private keys of Wompi Colombia)
+from a Wompi Commerce applicativo. Wompi authenticates with
+**OAuth2 client credentials**
 and is integrated through the `pywompi` package: the provider uses its generic
 authenticated `request(method, path, json=)` for the endpoints below and its
 `parse_event()` for webhook validation. The environment (sandbox vs

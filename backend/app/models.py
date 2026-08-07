@@ -512,6 +512,11 @@ class CreatorProfile(Base):
     display_name = Column(String(100), nullable=True)
     bio = Column(Text, nullable=True)
     avatar_url = Column(String(500), nullable=True)
+    # Public hero banner on the creator's landing page. Set via the creator's
+    # banner upload endpoint, which stores the file and stores its public URL
+    # here (``/media/banner/...``); None = the frontend shows a default
+    # gradient banner.
+    banner_url = Column(String(500), nullable=True)
     # Public social-media account handles/urls shown on the creator's public
     # landing page: {"twitter": "@handle", "instagram": "@handle",
     # "tiktok": "@handle", "other": "https://..."}. Keys are the supported

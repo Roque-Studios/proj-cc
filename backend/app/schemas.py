@@ -77,6 +77,9 @@ class CreatorProfileOut(BaseModel):
     display_name: str | None
     bio: str | None
     avatar_url: str | None
+    # Public hero banner on the landing page (``/media/banner/...`` after an
+    # upload; None = the frontend shows a default gradient).
+    banner_url: str | None
     social_links: dict[str, str] | None
     payout_info: dict | None
     created_at: datetime
@@ -96,6 +99,9 @@ class CreatorProfileUpdate(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=100)
     bio: str | None = Field(default=None, max_length=2000)
     avatar_url: str | None = Field(default=None, max_length=500)
+    # Direct URL override for the hero banner (the upload endpoint is the usual
+    # path; a url allows e.g. pasting a hosted image).
+    banner_url: str | None = Field(default=None, max_length=500)
     social_links: dict[str, str] | None = None
     payout_info: dict | None = None
 
@@ -183,6 +189,10 @@ class CreatorLandingProfileOut(BaseModel):
     display_name: str | None
     bio: str | None
     avatar_url: str | None
+    # Public hero banner (``/media/banner/...`` or None for the default).
+    banner_url: str | None = None
+    # Number of visible posts the creator has published (the hero's post count).
+    post_count: int = 0
 
 
 class ViewerLandingOut(BaseModel):
@@ -232,6 +242,10 @@ class PostMediaOut(BaseModel):
     # broadcast preview): the url is withheld so the feed never leaks media
     # links to viewers who can't access them.
     media_url: str | None
+    # Blurred public ``PREVIEW`` teaser url (``/preview/{post_id}/media``),
+    # set exactly when ``media_url`` is withheld — so non-followers see the
+    # shape of the content without ever receiving the real bytes.
+    preview_url: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -259,13 +273,17 @@ def build_post_out(
     *,
     unlocked: bool | None,
     include_media_urls: bool,
+    include_preview_urls: bool = False,
 ) -> PostOut:
     """Build the public post shape for a specific viewer.
 
     ``include_media_urls=False`` (non-follower teaser / locked broadcast
     preview) withholds every media url while keeping the media *metadata*
     (count, types); ``unlocked`` reflects the viewer's access to a paid
-    broadcast (``None`` when the post isn't one).
+    broadcast (``None`` when the post isn't one). When ``include_preview_urls``
+    is set (the same teaser/locked cases), each withheld media carries a
+    ``preview_url`` — the blurred public preview — so the frontend can render
+    the post's shape without ever receiving real content bytes.
     """
     return PostOut(
         id=post.id,
@@ -278,6 +296,11 @@ def build_post_out(
                 id=media.id,
                 media_type=media.media_type,
                 media_url=media.media_url if include_media_urls else None,
+                preview_url=(
+                    None
+                    if include_media_urls or not include_preview_urls
+                    else f"/preview/{post.id}/media?media_id={media.id}"
+                ),
                 created_at=media.created_at,
             )
             for media in post.media

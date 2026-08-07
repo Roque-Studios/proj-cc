@@ -23,7 +23,7 @@ import io
 import random
 from datetime import datetime, timezone
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 # Default fill/outline so the text stays readable on light and dark content.
 _FILL = (255, 255, 255, 210)
@@ -195,3 +195,60 @@ def output_format(original: bytes) -> str:
         "PNG": "image/png",
         "WEBP": "image/webp",
     }.get(fmt, "image/jpeg")
+
+
+_PREVIEW_BLUR_RADIUS = 12
+_PREVIEW_TEXT = "PREVIEW"
+
+
+def build_preview_layer(image_size: tuple[int, int]) -> Image.Image:
+    """A fixed diagonal ``PREVIEW`` stamp layer (public, no viewer identity)."""
+    width, height = image_size
+    font_size = max(28, min(width, height) // 6)
+    font = ImageFont.load_default(size=font_size)
+    layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    text_bbox = draw.textbbox((0, 0), _PREVIEW_TEXT, font=font)
+    text_w = text_bbox[2] - text_bbox[0]
+    text_h = text_bbox[3] - text_bbox[1]
+
+    tile = Image.new("RGBA", (text_w + 16, text_h + 16), (0, 0, 0, 0))
+    tile_draw = ImageDraw.Draw(tile)
+    tile_draw.text(
+        (8, 8),
+        _PREVIEW_TEXT,
+        font=font,
+        fill=(255, 255, 255, 220),
+        stroke_width=max(2, font_size // 10),
+        stroke_fill=(20, 20, 20, 220),
+    )
+    tile = tile.rotate(-30, expand=True, resample=Image.BICUBIC)
+    layer.paste(tile, (width // 2 - tile.width // 2, height // 2 - tile.height // 2), tile)
+    return layer
+
+
+def preview(original: bytes) -> bytes:
+    """A blurred, ``PREVIEW``-stamped teaser of an original (public-safe).
+
+    Non-followers see this on the landing page and feed: the real content is
+    heavily blurred and stamped so nothing usable leaks, while visitors still
+    get a sense of the post. Deterministic and viewer-independent (no identity
+    watermark), so the same bytes serve every visitor and can be cached once
+    per media file.
+    """
+    image, fmt = _decode(original)
+    blurred = image.convert("RGB").filter(
+        ImageFilter.GaussianBlur(_PREVIEW_BLUR_RADIUS)
+    )
+    composited = Image.alpha_composite(
+        blurred.convert("RGBA"),
+        build_preview_layer(image.size),
+    )
+    output = io.BytesIO()
+    if fmt == "PNG":
+        composited.save(output, format="PNG")
+    elif fmt == "WEBP":
+        composited.save(output, format="WEBP", quality=85)
+    else:  # GIF is rasterized to PNG by _decode; everything else -> JPEG
+        composited.convert("RGB").save(output, format="JPEG", quality=85)
+    return output.getvalue()

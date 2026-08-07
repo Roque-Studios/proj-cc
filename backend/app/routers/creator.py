@@ -12,12 +12,16 @@ next message attempt (the DM service reads the profile per send).
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..database import get_db
 from ..deps import get_current_user, require_creator
+from ..media import MediaValidationError, validate_upload
 from ..gateways import (
     CREATOR_GATEWAY_ORDER,
     GATEWAYS,
@@ -37,6 +41,7 @@ from ..schemas import (
     MessagingSettingsOut,
     MessagingSettingsUpdate,
 )
+from ..storage import get_avatar_storage, get_banner_storage
 
 router = APIRouter(prefix="/creator", tags=["creator"])
 
@@ -80,6 +85,140 @@ def update_profile(
         setattr(profile, field, value)
     db.commit()
     db.refresh(profile)
+    return profile
+
+
+# --------------------------------------------------------------------------- #
+# Public profile images (hero banner + avatar)
+# --------------------------------------------------------------------------- #
+
+_PROFILE_IMAGE_CHUNK_SIZE = 64 * 1024
+
+# kind -> CreatorProfile attribute holding the public url for that image.
+_PROFILE_IMAGE_ATTR = {"banner": "banner_url", "avatar": "avatar_url"}
+
+
+def _read_profile_image(file: UploadFile) -> bytes:
+    """Read a profile-image upload, rejecting it once it exceeds the size limit.
+
+    Reads the underlying sync file object (``UploadFile.read`` is async) —
+    same pattern as the posts router.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = file.file.read(_PROFILE_IMAGE_CHUNK_SIZE)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > settings.MAX_MEDIA_SIZE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"File exceeds the {settings.MAX_MEDIA_SIZE_BYTES} byte size limit",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _store_profile_image(
+    file: UploadFile,
+    user: User,
+    db: Session,
+    *,
+    kind: str,
+) -> CreatorProfile:
+    """Validate + store a public profile image (``banner`` or ``avatar``).
+
+    The file is validated exactly like post media (extension, content type,
+    magic bytes, size) and stored in the matching **public** store;
+    ``banner_url`` / ``avatar_url`` then points at ``/media/{kind}/{key}``.
+    Replacing the image deletes the previous file so orphaned bytes never
+    accumulate.
+    """
+    data = _read_profile_image(file)
+    try:
+        validate_upload(file.filename or "", file.content_type or "", data)
+    except MediaValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    ext = Path(file.filename or "").suffix.lower()
+    key = f"{kind}_{user.id}{ext}"
+    storage = get_banner_storage() if kind == "banner" else get_avatar_storage()
+    profile = _get_or_create_profile(db, user)
+    # Save the new file first, then drop the old one — a failed save never
+    # leaves the previous image deleted behind a stale url.
+    storage.save(key, data)
+    current = getattr(profile, _PROFILE_IMAGE_ATTR[kind])
+    if current:
+        old_key = current.rsplit("/", 1)[-1]
+        if old_key and old_key != key:
+            storage.delete(old_key)
+    setattr(profile, _PROFILE_IMAGE_ATTR[kind], f"/media/{kind}/{key}")
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+def _clear_profile_image(
+    profile: CreatorProfile,
+    db: Session,
+    *,
+    kind: str,
+) -> None:
+    """Remove a stored profile image (``banner`` or ``avatar``) and clear its url."""
+    attr = _PROFILE_IMAGE_ATTR[kind]
+    current = getattr(profile, attr)
+    if not current:
+        return
+    old_key = current.rsplit("/", 1)[-1]
+    storage = get_banner_storage() if kind == "banner" else get_avatar_storage()
+    storage.delete(old_key)
+    setattr(profile, attr, None)
+    db.commit()
+    db.refresh(profile)
+
+
+@router.post("/banner", response_model=CreatorProfileOut)
+def upload_banner(
+    file: UploadFile = File(...),
+    user: User = Depends(require_creator),
+    db: Session = Depends(get_db),
+):
+    """Creator-only: upload the public hero banner for the landing page."""
+    return _store_profile_image(file, user, db, kind="banner")
+
+
+@router.delete("/banner", response_model=CreatorProfileOut)
+def delete_banner(
+    user: User = Depends(require_creator),
+    db: Session = Depends(get_db),
+):
+    """Creator-only: remove the hero banner (falls back to the default gradient)."""
+    profile = _get_or_create_profile(db, user)
+    _clear_profile_image(profile, db, kind="banner")
+    return profile
+
+
+@router.post("/avatar", response_model=CreatorProfileOut)
+def upload_avatar(
+    file: UploadFile = File(...),
+    user: User = Depends(require_creator),
+    db: Session = Depends(get_db),
+):
+    """Creator-only: upload the public profile avatar (landing hero)."""
+    return _store_profile_image(file, user, db, kind="avatar")
+
+
+@router.delete("/avatar", response_model=CreatorProfileOut)
+def delete_avatar(
+    user: User = Depends(require_creator),
+    db: Session = Depends(get_db),
+):
+    """Creator-only: remove the avatar (falls back to the initial letter)."""
+    profile = _get_or_create_profile(db, user)
+    _clear_profile_image(profile, db, kind="avatar")
     return profile
 
 

@@ -117,7 +117,7 @@ export class CreatorLogin extends LitElement {
       <div class="login-wrap">
         <div class="login-card">
           <div class="brand">
-            <h1>Creator Gateway Settings</h1>
+            <h1>Creator Admin</h1>
             <p>Content Creator Engine — admin panel</p>
           </div>
 
@@ -160,8 +160,9 @@ export class CreatorLogin extends LitElement {
             </div>
 
             <p class="hint">
-              This page is the private admin entry — it is not linked from
-              anywhere and only reachable by visiting this URL directly.
+              This is the creator (admin) sign-in — reach it from
+              <code>/admin</code> (or the <code>/settings.html</code> alias).
+              Non-creator accounts are redirected away.
               <br />
               Tip: seed the creator account with
               <code>python -m app.seed_creator</code>.

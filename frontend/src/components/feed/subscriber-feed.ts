@@ -128,6 +128,23 @@ export class SubscriberFeed extends LitElement {
       overflow: hidden;
     }
 
+    /* Blurred public preview image (server-side blurred + PREVIEW-stamped,
+       further blurred in CSS for the teaser look). */
+    .preview-img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      filter: blur(18px) brightness(0.7);
+      transform: scale(1.1);
+    }
+
+    .preview-blur {
+      filter: blur(18px) brightness(0.85);
+      transform: scale(1.05);
+    }
+
     .locked-preview::before {
       content: '';
       position: absolute;
@@ -376,12 +393,21 @@ export class SubscriberFeed extends LitElement {
   private _renderMedia(post: FeedPost) {
     const isLocked = post.broadcast_price_cents != null && post.unlocked !== true
 
-    // Locked broadcast: metadata only — the feed never sends urls for locked
-    // content, so the preview is a styled lock panel (nothing to blur).
+    // Locked broadcast: the blurred public preview behind the lock panel (real
+    // urls are withheld — the preview is the server-blurred transform).
     if (isLocked) {
+      const preview = post.media.find((m) => m.preview_url)
       return html`
         <div class="media-stack">
           <div class="locked-preview">
+            ${preview
+              ? html`<img
+                  class="preview-img"
+                  src="${preview.preview_url}"
+                  alt=""
+                  loading="lazy"
+                />`
+              : nothing}
             <div class="lock-badge">
               <roque-icon name="lock" size="26"></roque-icon>
               <span class="lock-price">${this._price(post)}</span>
@@ -399,22 +425,32 @@ export class SubscriberFeed extends LitElement {
       `
     }
 
-    // Unlocked / regular: render the full watermarked media via the secure
-    // content endpoint.
+    // Regular / unlocked: real watermarked media via the secure content
+    // endpoint where the feed sends urls; blurred previews where it withholds
+    // them (the non-follower teaser).
+    const withMedia = post.media.filter((m) => m.media_url)
+    const previews = post.media.filter((m) => m.preview_url)
     return html`
       <div class="media-stack">
-        ${post.media.map(
-          (m) =>
-            m.media_url
-              ? html`<div class="media-item">
-                  <img
-                    class="media-img"
-                    src="${this._mediaUrl(m.media_url)}"
-                    alt="Post media"
-                    loading="lazy"
-                  />
-                </div>`
-              : nothing,
+        ${withMedia.map(
+          (m) => html`<div class="media-item">
+            <img
+              class="media-img"
+              src="${this._mediaUrl(m.media_url as string)}"
+              alt="Post media"
+              loading="lazy"
+            />
+          </div>`,
+        )}
+        ${previews.map(
+          (m) => html`<div class="media-item">
+            <img
+              class="media-img preview-blur"
+              src="${m.preview_url as string}"
+              alt=""
+              loading="lazy"
+            />
+          </div>`,
         )}
         ${post.broadcast_price_cents != null && post.unlocked === true
           ? html`<div class="unlock-row">

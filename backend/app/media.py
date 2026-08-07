@@ -28,7 +28,7 @@ from PIL import Image
 from .cache import get_cached_watermarked_media, set_watermarked_media
 from .config import settings
 from .storage import get_original_storage
-from .watermark import watermark
+from .watermark import preview, watermark
 
 logger = structlog.get_logger()
 
@@ -106,6 +106,22 @@ def save_original(data: bytes, storage_key: str) -> None:
 def delete_original(storage_key: str) -> None:
     """Remove an original from the private store (no-op if absent)."""
     get_original_storage().delete(storage_key)
+
+
+def serve_preview(storage_key: str) -> bytes:
+    """The blurred public preview bytes for a media file (cached, best-effort).
+
+    Unlike the per-viewer watermarked bytes, a preview is viewer-independent
+    (blur + ``PREVIEW`` stamp, no identity), so it is cached under the fixed
+    ``preview`` ref and served to any visitor. A cache failure degrades to a
+    fresh render.
+    """
+    cached = get_cached_watermarked_media("preview", storage_key)
+    if cached is not None:
+        return cached
+    blurred = preview(get_original_storage().read(storage_key))
+    set_watermarked_media("preview", storage_key, blurred)
+    return blurred
 
 
 def served_content_type(media_type: str | None) -> str:
