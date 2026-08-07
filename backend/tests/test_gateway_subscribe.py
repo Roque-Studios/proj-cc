@@ -108,7 +108,11 @@ def test_checkout_lists_only_enabled_configured_gateways(client):
     _configure(
         client, headers, "wompi",
         enabled=True,
-        config={"client_id": "a", "client_secret": "b"},
+        config={
+            "client_id": "a",
+            "client_secret": "b",
+            "webhook_url": "https://example.com/api/webhooks/wompi",
+        },
     )
     # A disabled gateway with full config must NOT appear.
     _configure(
@@ -211,7 +215,11 @@ def test_subscribe_without_provider_and_multiple_enabled_400(client, stub_build)
     _configure(
         client, headers, "wompi",
         enabled=True,
-        config={"client_id": "a", "client_secret": "b"},
+        config={
+            "client_id": "a",
+            "client_secret": "b",
+            "webhook_url": "https://example.com/api/webhooks/wompi",
+        },
     )
     sub_headers = _register(client, "sub@example.com")
     resp = client.post(
@@ -264,8 +272,8 @@ def test_build_provider_from_config_maps_stored_fields():
     assert provider.webhook_secret == "whsec_creator"
 
 
-def test_build_provider_from_config_coerces_numeric_fields():
-    """dia_de_pago arrives as a string (API form) and must not crash the provider."""
+def test_build_provider_from_config_ignores_legacy_keys():
+    """Stale config keys (e.g. the removed dia_de_pago) don't break the build."""
     from app.payments.factory import build_provider_from_config
 
     provider = build_provider_from_config(
@@ -273,10 +281,14 @@ def test_build_provider_from_config_coerces_numeric_fields():
         {
             "client_id": "app_1",
             "client_secret": "secret_1",
-            "dia_de_pago": "5",
+            "dia_de_pago": "5",  # legacy key from the old recurring-link config
+            "webhook_url": "https://example.com/api/webhooks/wompi",
+            "redirect_url": "https://example.com/return",
         },
     )
-    assert provider.dia_de_pago == 5
+    assert provider.name == "wompi"
+    assert provider.webhook_url == "https://example.com/api/webhooks/wompi"
+    assert provider.redirect_url == "https://example.com/return"
 
 
 def test_resolve_plan_id_prefers_creator_plan_then_env():

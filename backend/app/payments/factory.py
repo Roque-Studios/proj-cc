@@ -46,12 +46,6 @@ def get_payment_provider(settings) -> PaymentProvider:
     return provider_cls.from_settings(settings)
 
 
-# Settings attributes that must be ints when merged from a per-creator config
-# (stored values are strings from the API form). ``WOMPI_DIA_DE_PAGO`` lands in
-# ``WompiPaymentProvider`` which compares ``1 <= dia_de_pago <= 31`` — a string
-# would raise TypeError there instead of a clean config error.
-_NUMERIC_SETTING_ATTRS = {"WOMPI_DIA_DE_PAGO"}
-
 # Per-creator config field -> settings attribute each provider's ``from_settings``
 # reads. The per-creator config keys (see ``app.gateways.GatewaySpec``) are
 # mapped onto the platform settings vocabulary so the providers need no changes.
@@ -66,11 +60,11 @@ _CONFIG_FIELD_TO_SETTING: dict[tuple[str, str], str] = {
     ("paypal", "product_id"): "PAYPAL_PRODUCT_ID",
     ("wompi", "client_id"): "WOMPI_CLIENT_ID",
     ("wompi", "client_secret"): "WOMPI_CLIENT_SECRET",
+    ("wompi", "webhook_url"): "WOMPI_WEBHOOK_URL",
     ("wompi", "environment"): "WOMPI_ENVIRONMENT",
     ("wompi", "api_base_url"): "WOMPI_API_BASE_URL",
     ("wompi", "token_url"): "WOMPI_TOKEN_URL",
-    ("wompi", "dia_de_pago"): "WOMPI_DIA_DE_PAGO",
-    ("wompi", "redirect_url"): "WOMPI_3DS_REDIRECT_URL",
+    ("wompi", "redirect_url"): "WOMPI_REDIRECT_URL",
 }
 
 
@@ -96,14 +90,6 @@ def build_provider_from_config(gateway: str, config: dict) -> PaymentProvider:
         for value in [config.get(field)]
         if value not in (None, "")
     }
-    # Coerce numeric settings back to int (config values arrive as strings).
-    for attr in _NUMERIC_SETTING_ATTRS & overrides.keys():
-        try:
-            overrides[attr] = int(overrides[attr])
-        except (TypeError, ValueError):
-            # Field validation already bounds this to 1-31; a corrupted row
-            # surfaces as the provider's own ProviderConfigurationError below.
-            pass
     merged = SimpleNamespace(**{**settings.model_dump(), **overrides})
     return provider_cls.from_settings(merged)
 

@@ -224,9 +224,34 @@ export class CreatorGatewaySettings extends LitElement {
   private async _load() {
     this.loading = true
     this.error = ''
+    // Gateway settings drive the whole view — load them first and render even
+    // if the auxiliary profile/messaging calls below fail, so the gateway
+    // cards can never be hidden by an unrelated error. When this fails (e.g.
+    // an expired token), bail out: the auxiliary calls would just 401 again.
     try {
-      const [settings, messaging, profile] = await Promise.all([
-        api.getGatewaySettings(),
+      const settings = await api.getGatewaySettings()
+      this.settings = settings.filter((g) => UI_GATEWAYS.includes(g.gateway))
+      this.form = {}
+      this.enabled = {}
+      for (const g of this.settings) {
+        this.form[g.gateway] = {}
+        this.enabled[g.gateway] = g.enabled
+        for (const f of g.fields) {
+          // Non-secret stored values are echoed by the API (secrets never are)
+          // — pre-fill them so a save never silently resets e.g. the
+          // environment select. Choice fields default to their first option.
+          this.form[g.gateway][f.name] = f.value || f.options[0] || ''
+        }
+      }
+    } catch (err) {
+      this._handleError(err)
+      this.loading = false
+      return
+    }
+    // Profile + messaging are auxiliary: their failure must not blank the
+    // gateway cards (the page stays fully usable for gateway configuration).
+    try {
+      const [messaging, profile] = await Promise.all([
         api.getMessagingSettings(),
         api.getCreatorProfile(),
       ])
@@ -240,19 +265,6 @@ export class CreatorGatewaySettings extends LitElement {
         instagram: profile.social_links?.instagram ?? '',
         tiktok: profile.social_links?.tiktok ?? '',
         other: profile.social_links?.other ?? '',
-      }
-      this.settings = settings.filter((g) => UI_GATEWAYS.includes(g.gateway))
-      this.form = {}
-      this.enabled = {}
-      for (const g of this.settings) {
-        this.form[g.gateway] = {}
-        this.enabled[g.gateway] = g.enabled
-        for (const f of g.fields) {
-          // Pre-select the first option (e.g. sandbox) for choice fields.
-          if (f.options.length > 0) {
-            this.form[g.gateway][f.name] = f.options[0]
-          }
-        }
       }
     } catch (err) {
       this._handleError(err)
@@ -766,6 +778,7 @@ export class CreatorGatewaySettings extends LitElement {
     const form = this.form[g.gateway] ?? {}
     const canEnable = this._canEnable(g.gateway)
     const switchDisabled = !g.enabled && !canEnable
+    const hasSavedCredentials = g.fields.some((f) => f.configured)
 
     return html`
       <roque-card heading="${g.label}">
@@ -784,7 +797,9 @@ export class CreatorGatewaySettings extends LitElement {
                   ></roque-select>`
                 : html`<roque-text-field
                     label="${f.label}"
+                    type="${f.secret ? 'password' : 'text'}"
                     placeholder="${f.placeholder || (f.secret ? '••••••••' : '')}"
+                    autocomplete="${f.secret ? 'new-password' : ''}"
                     .value="${form[f.name] ?? ''}"
                     @aero-input="${(e: CustomEvent) =>
                       this._onField(g.gateway, f.name, e.detail?.value ?? '')}"
@@ -795,6 +810,13 @@ export class CreatorGatewaySettings extends LitElement {
             </div>
           `,
         )}
+
+        ${hasSavedCredentials
+          ? html`<p class="desc">
+              Values marked ✓ are saved. Leave a field blank to keep its
+              current value; enter a new one to replace it.
+            </p>`
+          : ''}
 
         <div class="footer-row">
           <div class="switch-zone">

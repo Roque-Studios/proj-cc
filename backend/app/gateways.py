@@ -90,13 +90,20 @@ GATEWAYS: dict[str, GatewaySpec] = {
         name="wompi",
         label="Wompi",
         description=(
-            "Cards via Wompi. Only two variables are needed: your "
-            "App ID (client id) and API Secret (client secret) from the Wompi "
-            "dashboard."
+            "Cards via Wompi. Enter your App ID (client id), API Secret "
+            "(client secret) and the Webhook URL Wompi notifies after every "
+            "successful payment — the backend's /api/webhooks/wompi endpoint."
         ),
         fields=(
             GatewayField("client_id", "WOMPI_CLIENT_ID (App ID)", required=True),
             GatewayField("client_secret", "WOMPI_CLIENT_SECRET (API Secret)", required=True),
+            GatewayField(
+                "webhook_url",
+                "Webhook URL",
+                required=True,
+                secret=False,
+                placeholder="https://your-domain.com/api/webhooks/wompi",
+            ),
             GatewayField(
                 "environment",
                 "Environment",
@@ -104,14 +111,8 @@ GATEWAYS: dict[str, GatewaySpec] = {
                 secret=False,
             ),
             GatewayField(
-                "dia_de_pago",
-                "Charge day of month",
-                secret=False,
-                placeholder="1-31",
-            ),
-            GatewayField(
                 "redirect_url",
-                "3DS return URL (optional)",
+                "Redirect URL after payment (optional)",
                 secret=False,
             ),
         ),
@@ -181,13 +182,6 @@ def validate_config_values(gateway: str, config: dict) -> None:
             raise ValueError(
                 f"{field.label} must be one of: {', '.join(field.options)}"
             )
-        if field.name == "dia_de_pago":
-            try:
-                day = int(value)
-            except (TypeError, ValueError):
-                raise ValueError("Charge day of month must be a number 1-31")
-            if not 1 <= day <= 31:
-                raise ValueError("Charge day of month must be a number 1-31")
 
 
 def missing_fields(gateway: str, config: dict) -> list[str]:

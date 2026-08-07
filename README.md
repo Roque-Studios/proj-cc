@@ -45,7 +45,7 @@ a clear error** if any required variable is missing or empty.
 | `PAYMENT_PROVIDER` | `mock` | Active payment gateway: `mock`, `stripe`, or `paypal`. Switching is a config change only — the subscription business logic is gateway-agnostic |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_API_BASE` | empty / Stripe base | Stripe credentials — required when `PAYMENT_PROVIDER=stripe` |
 | `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` / `PAYPAL_WEBHOOK_ID` / `PAYPAL_ENVIRONMENT` / `PAYPAL_PRODUCT_ID` | empty / `sandbox` / empty | PayPal credentials — required when `PAYMENT_PROVIDER=paypal`. `PAYPAL_ENVIRONMENT` is `sandbox` or `live`; `PAYPAL_PRODUCT_ID` optionally pins the catalog product billing plans attach to |
-| `WOMPI_CLIENT_ID` / `WOMPI_CLIENT_SECRET` / `WOMPI_ENVIRONMENT` / `WOMPI_API_BASE_URL` / `WOMPI_TOKEN_URL` / `WOMPI_DIA_DE_PAGO` / `WOMPI_3DS_REDIRECT_URL` | empty / `sandbox` / Wompi API URLs / `1` / empty | Wompi credentials — required when `PAYMENT_PROVIDER=wompi`. Environment is per-app (each applicativo is marked sandbox/production in the panel), not a URL switch; `WOMPI_DIA_DE_PAGO` is the monthly charge day; `WOMPI_3DS_REDIRECT_URL` is the post-3DS return URL |
+| `WOMPI_CLIENT_ID` / `WOMPI_CLIENT_SECRET` / `WOMPI_ENVIRONMENT` / `WOMPI_API_BASE_URL` / `WOMPI_TOKEN_URL` / `WOMPI_WEBHOOK_URL` / `WOMPI_REDIRECT_URL` / `WOMPI_3DS_REDIRECT_URL` | empty / `sandbox` / Wompi API URLs / empty | Wompi credentials — required when `PAYMENT_PROVIDER=wompi`. Environment is per-app (each applicativo is marked sandbox/production in the panel), not a URL switch. `WOMPI_WEBHOOK_URL` is the backend's `POST /api/webhooks/wompi` endpoint — sent as each payment link's `configuracion.urlWebhook` (Wompi only notifies payment links through it, so a paid subscription never activates without it). `WOMPI_REDIRECT_URL` is where the customer returns after paying a subscription link; `WOMPI_3DS_REDIRECT_URL` is the legacy alias |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` / `SMTP_TLS` | empty / `587` / … / `true` | Optional SMTP for payment-failure notifications. When `SMTP_HOST` is empty the notify task degrades to a structured log (dev/mock setups) |
 | `ORIGINAL_MEDIA_STORAGE_PATH` / `MAX_MEDIA_SIZE_BYTES` / `ALLOWED_MEDIA_EXTENSIONS` | `/data/media/original` / `10485760` / `.jpg,.jpeg,.png,.webp,.gif` | Where **private unwatermarked originals** live (never served directly — only internal code reads them; `GET /content/{post_id}/media?media_id={id}` serves the original **watermarked on the fly** to the post's creator or an active follower), the per-file size cap, and allowed extensions |
 | `BANNER_STORAGE_PATH` / `AVATAR_STORAGE_PATH` | `/data/media/banner` / `/data/media/avatar` | Where **public creator profile images** live — hero banners and avatars uploaded from the admin dashboard, served to any visitor via `GET /media/banner/{key}` / `GET /media/avatar/{key}` (content type follows the uploaded extension) |
@@ -94,17 +94,22 @@ subscriber's checkout once the creator enabled it with a complete config.
 
 Required credentials per gateway: **Stripe** — secret key + webhook secret;
 **PayPal** — client id, client secret, webhook id (+ environment, optional
-plan id); **Wompi** — just `WOMPI_CLIENT_ID` + `WOMPI_CLIENT_SECRET` (plus
-optional environment/payment day); **mock** — none (a zero-config dev
-gateway, backend-only, hidden from the settings UI).
+plan id); **Wompi** — `WOMPI_CLIENT_ID` + `WOMPI_CLIENT_SECRET` + the
+**webhook URL** (`POST /api/webhooks/wompi` — required, since Wompi only
+notifies payment links through it), plus optional environment and redirect
+URLs; **mock** — none (a zero-config dev gateway, backend-only, hidden from
+the settings UI).
 
 - `GET /api/creator/gateway-settings` — creator-only; returns every gateway's
   form metadata (labels, placeholders, allowed values) with per-field
-  **`configured` booleans** — secret values are **never** returned.
+  **`configured` booleans** — secret values are **never** returned. Stored
+  values of **non-secret** fields (e.g. the environment select) are echoed
+  via a per-field `value` so the form pre-fills them and a save never
+  silently resets them.
 - `PUT /api/creator/gateway-settings/{gateway}` — update the enabled flag and
   config. Enabling a gateway with incomplete required config is a `400`
-  listing the missing fields; environments (sandbox/live) and the Wompi
-  payment day are validated. Config merges over stored values — empty strings
+  listing the missing fields; constrained values (environments) are
+  validated. Config merges over stored values — empty strings
   keep the existing secret, so updates never wipe what the client can't see.
 - `GET /api/creators/{creator_id}/gateways` — public; the gateways a
   subscriber can pay with (**only** enabled + configured ones), so checkout
@@ -131,9 +136,14 @@ from the `roque-*` components: cards, switches, text fields, badges, toasts;
 
 2. Visit `http://localhost/admin` and sign in with the seeded account. The
    panel is gated to the creator role — a regular account is redirected away.
-3. Toggle Stripe / PayPal / Wompi and enter each gateway's credentials. A
-   gateway's switch stays disabled until its required config is complete (the
-   backend enforces the same rule).
+3. Toggle Stripe / PayPal / Wompi and enter each gateway's credentials in the
+   **Settings** tab. A gateway's switch stays disabled until its required
+   config is complete (the backend enforces the same rule). Secret fields are
+   password-masked and their values are never shown back — a field marked
+   "✓ saved" keeps its value when you leave it blank, and a new value
+   replaces it. The settings tab renders the gateway cards even if the
+   profile/messaging panels fail, and lazy profile creation is race-safe, so
+   a first visit never blanks the page.
 
 The frontend uses a token-based fetch client (`frontend/src/lib/api.ts`,
 Bearer access token in localStorage); in dev, `yarn dev` proxies `/api/*` to
@@ -172,19 +182,20 @@ proxies it, and only internal service code can read originals. Covered by
 
 ### Image watermarking (per-viewer, on the fly)
 
-`app/watermark.py` is an OnlyFans-style traceable watermark service: every
+`app/watermark.py` is a traceable watermark service: every
 `GET /content/{post_id}/media?media_id={id}` request re-encodes the private
 original with the **requesting viewer's** identity — short hashes of their
-user ref and the post id plus a UTC timestamp tiled diagonally across the
-image (white text, dark outline + shadow, legible over arbitrary content).
-Because the viewer is only known at request time, the watermark is applied on
-the fly at serve time; no pre-watermarked copy is persisted, and the original
-bytes are never exposed.
+user ref and the post id plus a UTC timestamp rendered as a small,
+semi-transparent line in the image's **bottom-right corner** (subtle enough
+not to spoil the photo, persistent enough to trace a leak). Because the
+viewer is only known at request time, the watermark is applied on the fly at
+serve time; no pre-watermarked copy is persisted, and the original bytes are
+never exposed.
 
-- **Deterministic placement** — the layout is seeded from a hash of the image
-  bytes + viewer ref: the same (image, viewer) always yields byte-identical
-  output (traceable, cacheable per viewer), while different viewers get
-  different placements and text.
+- **Traceable text** — the text (viewer/post hashes + UTC timestamp) carries
+  the identity, so every viewer still receives byte-different output even
+  though the corner placement is fixed; the same (image, viewer, timestamp)
+  is always byte-identical (traceable, cacheable per viewer).
 - **Identity source** — the media endpoint accepts the access JWT via either
   the `Authorization` header or a `?token=` query parameter (`<img>` tags
   can't send an `Authorization` header). The viewer ref is echoed in the
@@ -639,24 +650,45 @@ production) is a property of the applicativo — the credentials you configure �
 not a URL switch; `WOMPI_API_BASE_URL` / `WOMPI_TOKEN_URL` overrides exist for
 test accounts.
 
-**Recurring subscriptions (with 3DS)** — `create_subscription` creates a
-**per-subscription recurring payment link** (`POST /EnlacePagoRecurrente`,
-`nombre`, `monto` = `SUBSCRIPTION_TIER_PRICE_CENTS`, `diaDePago` =
-`WOMPI_DIA_DE_PAGO`). The subscriber completes the hosted page (3DS is
-handled there) and is charged monthly on `diaDePago`; the link id doubles as
-our `external_ref` and canceling = disabling that link (`POST
-/EnlacePagoRecurrente/{id}`).
+**Subscriptions via hosted payment links (with 3DS)** — Wompi's recurring-link
+endpoint (`EnlacePagoRecurrente`) was creating bad states with no fix ETA, so
+`create_subscription` uses `pywompi.WompiClient.create_payment_link`
+(`POST /EnlacePago`) instead: it creates a hosted **one-time payment link**
+whose payload is `identificadorEnlaceComercio` = the **creator id** (our
+merchant reference, echoed back by webhooks), `nombreProducto` =
+"subscription to <creator username>" (the creator tag), and `monto` =
+`SUBSCRIPTION_TIER_PRICE_CENTS`. The link's `configuracion` carries
+**`urlWebhook`** = `WOMPI_WEBHOOK_URL` (`POST /api/webhooks/wompi` — without
+it Wompi never notifies us, so a paid subscription would never activate) and
+**`urlRedirect`** = the per-checkout success url (falling back to
+`WOMPI_REDIRECT_URL`) so the customer lands back on the checkout page after
+paying; `urlRetorno` mirrors the cancel url when provided. The subscriber
+completes the hosted page (3DS is handled there); the link id doubles as our
+`external_ref`. Because a one-time link never auto-charges, cancellation is
+**local-only** (the row is marked `canceled`; there is no recurring charge at
+Wompi to disable) — and renewals need a **fresh link each month** (a later
+paid link reconciles on the same row via webhook: it stays active and records
+another payment).
 
 **Webhooks (`wompi_hash` signature)** — Wompi signs every webhook with the
 `wompi_hash` header: the HMAC-SHA256 of the **raw body** (byte for byte)
 keyed with your API Secret. `POST /api/webhooks/wompi` validates via
 `pywompi.parse_event` before touching anything; a bad signature is a `400`.
-Transaction events carry `data.transaccion.estado` (`APROBADA` / `RECHAZADA`):
-`APROBADA` activates the pending subscription — and renewals reconcile — by
-matching the **payer email** (the events carry the suscripcion ref, not the
-link id; `external_ref` deliberately stays the link id so cancellation keeps
-targeting the right link). A `RECHAZADA` on an active subscription moves it to
-`past_due` (grace-period notification).
+(Behind nginx, keep `underscores_in_headers on;` — the default ignores
+header names containing underscores, so `wompi_hash` would be dropped and
+**every** webhook would fail as a "possible spoof".)
+Payment-link transactions arrive as a **flat payload**
+(`ResultadoTransaccion` = "ExitosaAprobada" on success, `EnlacePago.Id` =
+the link id we stored, `EnlacePago.IdentificadorEnlaceComercio` = our creator
+id, `cliente.Email` = the payer) — Wompi does **not** send the legacy nested
+`data.transaccion.estado` shape for payment links, so the flat form is
+normalized first (the legacy shape is still parsed for compatibility).
+`APROBADA`/"Exitosa…" activates the pending subscription — and later payments
+reconcile — by matching the **echoed link id** directly, else the **merchant
+reference + payer email** (creator id + `cliente.Email`), pinned so a
+subscriber with rows for several creators activates the right one.
+`external_ref` deliberately stays the link id. A rejected payment on an
+active subscription moves it to `past_due` (grace-period notification).
 
 **One-time charges** — `charge_one_time` uses
 `POST /TransaccionCompra/TokenizadaSin3Ds` with a card token from client-side
@@ -664,16 +696,18 @@ tokenization (the Wompi JS SDK with your public key; pass it as
 `payment_method_token`). Cards that require 3DS go through
 `charge_one_time_3ds` (`POST /TransaccionCompra/3Ds`), which returns
 `urlCompletarPago3Ds` to redirect the customer to; the outcome arrives by
-webhook (`WOMPI_3DS_REDIRECT_URL` is the return URL).
+webhook (`WOMPI_REDIRECT_URL` / `WOMPI_3DS_REDIRECT_URL` is the return URL).
 
 Covered by `backend/tests/test_wompi_integration.py`, which fakes the sandbox
 API through `pywompi.WompiClient(http_client=httpx.MockTransport(...))` (no
-network): subscribe → pending row + hosted link, signature validation
-(valid/forged/unknown-state), `APROBADA` → active + ref adoption,
-renewals, `RECHAZADA` → `past_due`, cancel, tokenized/3DS one-time charges,
-and config guards. A real-sandbox test (`test_wompi_sandbox_subscribe_flow`)
-runs when `WOMPI_CLIENT_ID` / `WOMPI_CLIENT_SECRET` are set **and**
-`RUN_WOMPI_SANDBOX=1`.
+network): subscribe → pending row + hosted payment link (merchant ref +
+product name asserted), signature validation (valid/forged/unknown-state),
+`APROBADA` → active via link-ref and via (creator, email) matching —
+including pinning the right creator when a subscriber has rows for several
+creators — renewals, `RECHAZADA` → `past_due`, local-only cancel,
+tokenized/3DS one-time charges, and config guards. A real-sandbox test
+(`test_wompi_sandbox_subscribe_flow`) runs when `WOMPI_CLIENT_ID` /
+`WOMPI_CLIENT_SECRET` are set **and** `RUN_WOMPI_SANDBOX=1`.
 
 > **License note:** `pywompi` is GPL-3.0-or-later — keep that in mind if you
 distribute this project as a closed product.

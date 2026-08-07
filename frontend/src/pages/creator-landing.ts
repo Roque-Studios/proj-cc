@@ -6,6 +6,7 @@ import '../components/data/badge.ts'
 import '../components/layouts/card.ts'
 import '../components/buttons/button.ts'
 import '../components/media/icon.ts'
+import '../components/media/media-viewer.ts'
 import '../components/feedback/spinner.ts'
 import '../components/feed/subscriber-feed.ts'
 import { api, ApiError } from '../lib/api'
@@ -36,6 +37,8 @@ export class CreatorLandingPage extends LitElement {
   @state() private loading = true
   @state() private error = ''
   @state() private missingCreatorId = false
+  /** Full-screen viewer state: urls + index, or null when closed. */
+  @state() private viewer: { urls: string[]; index: number } | null = null
 
   static styles = css`
     :host {
@@ -85,6 +88,12 @@ export class CreatorLandingPage extends LitElement {
       position: relative;
       z-index: 2;
       margin-top: -44px;
+      cursor: zoom-in;
+      transition: transform 0.2s ease;
+    }
+
+    .hero-avatar:hover {
+      transform: scale(1.04);
     }
 
     .hero-info {
@@ -421,7 +430,14 @@ export class CreatorLandingPage extends LitElement {
 
           <roque-card>
             <div class="hero-body">
-              <div class="hero-avatar">
+              <div
+                class="hero-avatar"
+                title="View full size"
+                @click="${() =>
+                  profile.avatar_url
+                    ? (this.viewer = { urls: [profile.avatar_url], index: 0 })
+                    : null}"
+              >
                 <roque-avatar
                   src="${profile.avatar_url || ''}"
                   alt="${displayName}"
@@ -516,6 +532,14 @@ export class CreatorLandingPage extends LitElement {
             : nothing}
         </section>
       </div>
+
+      ${this.viewer
+        ? html`<roque-media-viewer
+            .urls="${this.viewer.urls}"
+            .index="${this.viewer.index}"
+            @aero-close="${() => (this.viewer = null)}"
+          ></roque-media-viewer>`
+        : nothing}
     `
   }
 }

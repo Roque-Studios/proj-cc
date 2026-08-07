@@ -333,6 +333,8 @@ def test_fake_provider_calls_recorded(db_session):
     assert create_call[2]["metadata"] == {
         "subscriber_id": str(subscriber_id),
         "creator_id": str(creator_id),
+        # The creator tag — Wompi's ``nombreProducto`` = "subscription to <tag>".
+        "creator_username": "creator",
     }
     assert create_call[2]["customer_ref"] == "fake_cus_1"
     assert fake.canceled == ["fake_sub_1"]

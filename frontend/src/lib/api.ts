@@ -93,6 +93,10 @@ export interface GatewayField {
   placeholder: string
   options: string[]
   configured: boolean
+  // Stored value echoed for NON-secret fields only (e.g. the environment
+  // select) — secrets always come back null, so the form can pre-fill what's
+  // safe to show without ever receiving the keys.
+  value?: string | null
 }
 
 export interface GatewaySettings {
@@ -460,10 +464,19 @@ export const api = {
   subscribe(
     creatorId: number,
     provider?: string,
+    successUrl?: string,
+    cancelUrl?: string,
   ): Promise<SubscribeResult> {
     return request<SubscribeResult>('/subscribe', {
       method: 'POST',
-      body: JSON.stringify({ creator_id: creatorId, provider: provider ?? null }),
+      body: JSON.stringify({
+        creator_id: creatorId,
+        provider: provider ?? null,
+        // The hosted gateway redirects the customer back here after paying
+        // (Wompi payment links use this as their urlRedirect).
+        success_url: successUrl ?? null,
+        cancel_url: cancelUrl ?? null,
+      }),
     })
   },
 

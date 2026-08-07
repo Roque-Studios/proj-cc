@@ -27,7 +27,7 @@ from sqlalchemy import select
 
 from .config import settings
 from .database import SessionLocal
-from .models import User, UserRole
+from .models import CreatorProfile, User, UserRole
 from .security import hash_password
 
 
@@ -63,6 +63,17 @@ def seed_creator(email: str, password: str) -> tuple[User, str]:
             db.commit()
             db.refresh(user)
             action = "promoted"
+
+        # The profile row is created up front so the admin settings tab's first
+        # load (profile + messaging settings fetched concurrently) never races
+        # on lazy profile creation — both calls would try to INSERT the row and
+        # one would 500, hiding the gateway cards.
+        profile = db.scalar(
+            select(CreatorProfile).where(CreatorProfile.user_id == user.id)
+        )
+        if profile is None:
+            db.add(CreatorProfile(user_id=user.id, display_name=user.username))
+            db.commit()
         return user, action
 
 

@@ -1,4 +1,4 @@
-"""Per-viewer image watermarking (OnlyFans-style traceable watermarks).
+"""Per-viewer image watermarking (traceable watermarks).
 
 Renders the requesting viewer's identity + a timestamp into the image so a
 leaked screenshot can be traced back to who fetched it and when. The watermark
@@ -7,11 +7,11 @@ is only known then.
 
 Properties:
 
-- **Deterministic placement**: the layout is seeded from a hash of the image
-  bytes + the viewer reference, so the same (image, viewer) always produces
-  the same placement — while different viewers see different layouts.
-- **Legible**: white text with a dark outline and a subtle shadow band renders
-  readably over arbitrary photo content.
+- **Subtle**: a single line of small, semi-transparent text in the image's
+  **bottom-right corner** (with a margin) — the content stays clean while
+  every served copy still carries the viewer's traceable identity.
+- **Legible**: white text with a dark outline and a drop shadow renders
+  readably over arbitrary photo content without dominating it.
 - **Format-preserving**: JPEG/PNG/WEBP are re-encoded in-kind; animated GIFs
   are rasterized to their first frame and served as PNG.
 """
@@ -20,23 +20,18 @@ from __future__ import annotations
 
 import hashlib
 import io
-import random
 from datetime import datetime, timezone
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 # Default fill/outline so the text stays readable on light and dark content.
-_FILL = (255, 255, 255, 210)
-_STROKE = (20, 20, 20, 210)
-_STROKE_WIDTH_FACTOR = 0.06  # relative to font size
-_SHADOW_OFFSET = 0.02  # relative to image size
-
-
-def _seed(image_bytes: bytes, user_ref: str) -> int:
-    """Deterministic PRNG seed for a given (image, viewer) pair."""
-    return int.from_bytes(
-        hashlib.sha256(image_bytes + user_ref.encode()).digest()[:8], "big"
-    )
+_FILL = (255, 255, 255, 160)  # semi-transparent so the watermark stays subtle
+_STROKE = (20, 20, 20, 180)
+_STROKE_WIDTH_FACTOR = 0.08  # relative to font size
+# Corner margin + drop-shadow offset (absolute px, so small images keep the
+# watermark close to the corner instead of far inside it).
+_CORNER_MARGIN = 10
+_SHADOW_OFFSET = 2
 
 
 def build_watermark_text(
@@ -64,8 +59,10 @@ def build_watermark_text(
 
 
 def _font_size(image_size: tuple[int, int]) -> int:
+    """A small, subtle font — sized to the image but capped so very large
+    photos don't get an oversized watermark."""
     width, height = image_size
-    return max(22, min(width, height) // 12)
+    return min(max(14, min(width, height) // 32), 36)
 
 
 def build_watermark_layer(
@@ -75,13 +72,14 @@ def build_watermark_layer(
     image_bytes: bytes = b"",
     post_id: int | None = None,
 ) -> Image.Image:
-    """A transparent RGBA layer with the watermark tiled diagonally across it.
+    """A transparent RGBA layer with a small watermark in the bottom-right corner.
 
-    All randomness is seeded from ``(image_bytes, user_ref)`` — same pair, same
-    layout; different viewer, different placement. ``image_bytes`` is optional
-    (used only for seeding); when omitted the layout is deterministic per
-    ``(size, user_ref)``. ``post_id`` is embedded as a hash in the text (see
-    :func:`build_watermark_text`) so a leak can be traced back to the post.
+    A single line of small, semi-transparent traceable text (see
+    :func:`build_watermark_text`) anchored to the image's bottom-right corner
+    with a fixed margin — subtle enough not to spoil the photo, persistent
+    enough to trace a leak back to its viewer and post. The text (not the
+    placement) carries the viewer/post identity, so ``image_bytes`` is accepted
+    only for signature compatibility and does not affect the layout.
     """
     width, height = image_size
     font_size = _font_size(image_size)
@@ -95,50 +93,26 @@ def build_watermark_layer(
     text_w = text_bbox[2] - text_bbox[0]
     text_h = text_bbox[3] - text_bbox[1]
 
-    rng = random.Random(_seed(image_bytes or f"{width}x{height}".encode(), user_ref))
-    angle = rng.uniform(-45, -20)
     stroke_width = max(1, int(font_size * _STROKE_WIDTH_FACTOR))
-    shadow = int(min(width, height) * _SHADOW_OFFSET)
+    # Anchor the text at the bottom-right corner (right-aligned to the margin).
+    x = width - text_w - _CORNER_MARGIN
+    y = height - text_h - _CORNER_MARGIN
 
-    def _draw_tile(px: int, py: int) -> None:
-        # Roomy tile so the shadow + stroked text + rotation all stay inside.
-        tile_w = text_w + 2 * shadow + 8
-        tile_h = text_h + 2 * shadow + 8
-        tile = Image.new("RGBA", (tile_w, tile_h), (0, 0, 0, 0))
-        tile_draw = ImageDraw.Draw(tile)
-        # Drop shadow first, then the stroked text, for legibility.
-        tile_draw.text(
-            (4 + shadow, 4 + shadow), text, font=font, fill=(0, 0, 0, 120)
-        )
-        tile_draw.text(
-            (4, 4),
-            text,
-            font=font,
-            fill=_FILL,
-            stroke_width=stroke_width,
-            stroke_fill=_STROKE,
-        )
-        # expand=True keeps the whole rotated line (a thin unexpanded tile would
-        # clip most of the diagonal text to nothing).
-        tile = tile.rotate(angle, expand=True, resample=Image.BICUBIC)
-        layer.paste(tile, (px, py), tile)
-
-    # Staggered brick grid: rows walk across, alternate rows offset by half a
-    # column, and every tile rotated — reads as a diagonal watermark, dense
-    # enough that cropping it out is impractical.
-    row_h = int(max(text_h, 14) * rng.uniform(2.0, 3.2))
-    col_w = int(max(text_w, text_h) * rng.uniform(1.15, 1.45))
-    row = 0
-    y = -max(text_h * 2, 32)
-    while y < height:
-        offset = (row % 2) * (col_w // 2)
-        x = -max(text_w, text_h) * 2 + offset
-        while x < width:
-            _draw_tile(int(x), int(y))
-            x += col_w
-        y += row_h
-        row += 1
-
+    # Drop shadow first, then the stroked text, for legibility.
+    draw.text(
+        (x + _SHADOW_OFFSET, y + _SHADOW_OFFSET),
+        text,
+        font=font,
+        fill=(0, 0, 0, 120),
+    )
+    draw.text(
+        (x, y),
+        text,
+        font=font,
+        fill=_FILL,
+        stroke_width=stroke_width,
+        stroke_fill=_STROKE,
+    )
     return layer
 
 

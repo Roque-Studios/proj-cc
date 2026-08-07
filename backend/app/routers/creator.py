@@ -16,6 +16,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -47,12 +48,32 @@ router = APIRouter(prefix="/creator", tags=["creator"])
 
 
 def _get_or_create_profile(db: Session, user: User) -> CreatorProfile:
+    """The creator's profile row, creating it lazily (race-safe).
+
+    The admin settings page loads the profile and the messaging settings
+    concurrently, and both call this helper — two requests can pass the
+    SELECT while no row exists and both try to INSERT. The unique constraint
+    then fires for the loser, which used to 500 the whole settings tab (the
+    gateway cards never rendered). On ``IntegrityError`` we roll back and
+    return the row the winner committed.
+    """
     profile = db.scalar(select(CreatorProfile).where(CreatorProfile.user_id == user.id))
-    if profile is None:
-        profile = CreatorProfile(user_id=user.id, display_name=user.username)
-        db.add(profile)
+    if profile is not None:
+        return profile
+    profile = CreatorProfile(user_id=user.id, display_name=user.username)
+    db.add(profile)
+    try:
         db.commit()
-        db.refresh(profile)
+    except IntegrityError:
+        # Lost the create race — a concurrent request committed the row between
+        # our SELECT and INSERT. Adopt the winner's row instead of failing.
+        db.rollback()
+        profile = db.scalar(
+            select(CreatorProfile).where(CreatorProfile.user_id == user.id)
+        )
+        if profile is None:
+            raise
+    db.refresh(profile)
     return profile
 
 
@@ -284,6 +305,14 @@ def _settings_out(gateway: str, row: CreatorGatewayConfig | None) -> GatewaySett
                 placeholder=field.placeholder,
                 options=list(field.options),
                 configured=bool(str(config.get(field.name, "")).strip()),
+                # Echo the stored value for NON-secret fields only (e.g. the
+                # environment select) so the form can pre-fill them — a save
+                # must never silently reset them. Secrets are never returned.
+                value=(
+                    (str(config.get(field.name, "")) or None)
+                    if not field.secret
+                    else None
+                ),
             )
             for field in spec.fields
         ],

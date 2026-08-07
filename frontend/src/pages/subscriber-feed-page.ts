@@ -1,10 +1,11 @@
-import { LitElement, html, css } from 'lit'
+import { LitElement, html, css, nothing } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 
 import '../components/feed/subscriber-feed.ts'
 import '../components/layouts/card.ts'
 import '../components/buttons/button.ts'
 import '../components/data/avatar.ts'
+import '../components/media/media-viewer.ts'
 import '../components/feedback/spinner.ts'
 import { api, ApiError } from '../lib/api'
 import type { CreatorLanding } from '../lib/api'
@@ -24,6 +25,8 @@ export class SubscriberFeedPage extends LitElement {
   @state() private landing: CreatorLanding | null = null
   @state() private loading = true
   @state() private error = ''
+  /** Full-screen viewer state: urls + index, or null when closed. */
+  @state() private viewer: { urls: string[]; index: number } | null = null
 
   static styles = css`
     :host {
@@ -42,6 +45,15 @@ export class SubscriberFeedPage extends LitElement {
       align-items: center;
       gap: 12px;
       margin-bottom: 14px;
+    }
+
+    .header-avatar {
+      cursor: zoom-in;
+      transition: transform 0.2s ease;
+    }
+
+    .header-avatar:hover {
+      transform: scale(1.05);
     }
 
     .header-info {
@@ -140,11 +152,20 @@ export class SubscriberFeedPage extends LitElement {
     return html`
       <div class="page">
         <div class="header">
-          <roque-avatar
-            src="${profile.avatar_url || ''}"
-            alt="${displayName}"
-            size="52"
-          ></roque-avatar>
+          <div
+            class="header-avatar"
+            title="View full size"
+            @click="${() =>
+              profile.avatar_url
+                ? (this.viewer = { urls: [profile.avatar_url], index: 0 })
+                : null}"
+          >
+            <roque-avatar
+              src="${profile.avatar_url || ''}"
+              alt="${displayName}"
+              size="52"
+            ></roque-avatar>
+          </div>
           <div class="header-info">
             <h1 class="header-name">${displayName}</h1>
             <p class="header-handle">@${profile.username || ''}</p>
@@ -189,6 +210,14 @@ export class SubscriberFeedPage extends LitElement {
               </div>
             </roque-card>`}
       </div>
+
+      ${this.viewer
+        ? html`<roque-media-viewer
+            .urls="${this.viewer.urls}"
+            .index="${this.viewer.index}"
+            @aero-close="${() => (this.viewer = null)}"
+          ></roque-media-viewer>`
+        : nothing}
     `
   }
 }

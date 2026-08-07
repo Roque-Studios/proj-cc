@@ -67,9 +67,16 @@ class Settings(BaseSettings):
     WOMPI_ENVIRONMENT: str = "sandbox"
     WOMPI_API_BASE_URL: str = "https://api.wompi.sv"
     WOMPI_TOKEN_URL: str = "https://id.wompi.sv/connect/token"
-    # Recurring subscriptions charge the subscriber on this day of each month.
-    WOMPI_DIA_DE_PAGO: int = 1
-    # Where the customer returns after completing a 3DS one-time charge.
+    # The absolute, publicly reachable URL of the backend's webhook endpoint
+    # (POST /api/webhooks/wompi). Sent as each payment link's
+    # ``configuracion.urlWebhook`` — without it Wompi never notifies us, so a
+    # paid subscription would never activate. Required (per-creator field too).
+    WOMPI_WEBHOOK_URL: str = ""
+    # Where the customer returns after paying a hosted subscription link
+    # (the subscribe request's success_url takes precedence per checkout).
+    WOMPI_REDIRECT_URL: str = ""
+    # Legacy alias for WOMPI_REDIRECT_URL (3DS one-time charges use the same
+    # return URL); kept for backward compatibility.
     WOMPI_3DS_REDIRECT_URL: str = ""
 
     # Single subscription tier (monthly). The plan id is the gateway price id

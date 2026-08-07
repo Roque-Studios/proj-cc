@@ -339,7 +339,14 @@ export class SubscribeCheckout extends LitElement {
     this.subscribing = true
     this.error = ''
     try {
-      const result = await api.subscribe(this.creatorId, this.selected)
+      const result = await api.subscribe(
+        this.creatorId,
+        this.selected,
+        // The hosted gateway redirects the customer back to this checkout
+        // page after paying — the return path reconciles via polling.
+        window.location.href,
+        window.location.href,
+      )
       this.status = {
         viewer_level: 'registered',
         subscription: result.subscription,

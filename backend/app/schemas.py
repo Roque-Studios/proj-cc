@@ -536,6 +536,9 @@ class GatewayFieldOut(BaseModel):
     ``configured`` reports whether the creator has a stored value for this
     field; secret values themselves are **never** returned (only the boolean),
     so the settings UI can render forms without ever echoing keys back.
+    ``value`` echoes the stored value for **non-secret** fields only (e.g. the
+    environment select) so the form can pre-fill them — always ``None`` for
+    secret fields.
     """
 
     name: str
@@ -545,6 +548,7 @@ class GatewayFieldOut(BaseModel):
     placeholder: str
     options: list[str]
     configured: bool
+    value: str | None = None
 
 
 class GatewaySettingsOut(BaseModel):

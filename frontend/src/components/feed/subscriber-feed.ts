@@ -5,6 +5,7 @@ import '../layouts/card.ts'
 import '../data/badge.ts'
 import '../buttons/button.ts'
 import '../media/icon.ts'
+import '../media/media-viewer.ts'
 import '../feedback/spinner.ts'
 import '../feedback/toast.ts'
 import { api, ApiError, getAccessToken } from '../../lib/api'
@@ -50,6 +51,8 @@ export class SubscriberFeed extends LitElement {
   @state() private toastMessage = ''
   @state() private toastHeading = ''
   @state() private toastType: 'info' | 'error' = 'info'
+  /** Full-screen viewer state: post id + media index, or null when closed. */
+  @state() private viewer: { urls: string[]; index: number } | null = null
 
   private _page = 0
   private _pagesLoaded = new Set<number>()
@@ -215,6 +218,109 @@ export class SubscriberFeed extends LitElement {
       margin-bottom: 12px;
     }
 
+    /* --- Carousel (multi-media posts) --- */
+    .carousel {
+      position: relative;
+      border-radius: 5px;
+      overflow: hidden;
+      border: 1px solid #d0d0d0;
+      background: #0e1621;
+    }
+
+    .carousel-track {
+      display: flex;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      scrollbar-width: none; /* Firefox */
+      -ms-overflow-style: none; /* IE */
+    }
+
+    .carousel-track::-webkit-scrollbar {
+      display: none;
+    }
+
+    .carousel-slide {
+      flex: 0 0 100%;
+      scroll-snap-align: start;
+      cursor: zoom-in;
+    }
+
+    .carousel-img {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 480px;
+      object-fit: cover;
+    }
+
+    .carousel-arrow {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 32px;
+      height: 32px;
+      border: 1px solid rgba(255, 255, 255, 0.45);
+      border-radius: 50%;
+      background: rgba(10, 18, 26, 0.55);
+      color: #fff;
+      font-size: 18px;
+      line-height: 30px;
+      text-align: center;
+      cursor: pointer;
+      transition: background 0.15s ease, transform 0.15s ease;
+      user-select: none;
+    }
+
+    .carousel-arrow:hover {
+      background: rgba(60, 127, 177, 0.85);
+      transform: translateY(-50%) scale(1.08);
+    }
+
+    .carousel-arrow.prev {
+      left: 8px;
+    }
+
+    .carousel-arrow.next {
+      right: 8px;
+    }
+
+    .carousel-dots {
+      position: absolute;
+      bottom: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 5px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(10, 18, 26, 0.55);
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.45);
+      transition: background 0.15s ease, transform 0.15s ease;
+    }
+
+    .dot.active {
+      background: #7fc0ec;
+      transform: scale(1.2);
+    }
+
+    .carousel-count {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(10, 18, 26, 0.6);
+      color: #e6edf4;
+      font-size: 11px;
+      letter-spacing: 0.3px;
+    }
+
     /* --- Feed footer --- */
     .feed-footer {
       display: flex;
@@ -374,6 +480,21 @@ export class SubscriberFeed extends LitElement {
     return `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
   }
 
+  private _viewerUrls(post: FeedPost): string[] {
+    // Every visible media (real url for followers, preview for locked/teasers)
+    // — the clickable set, in feed order.
+    return post.media
+      .map((m) => m.media_url ?? m.preview_url ?? '')
+      .filter((u) => u !== '')
+      .map((u) => this._mediaUrl(u))
+  }
+
+  private _openViewer(post: FeedPost, mediaIndex = 0) {
+    const urls = this._viewerUrls(post)
+    if (urls.length === 0) return
+    this.viewer = { urls, index: Math.min(mediaIndex, urls.length - 1) }
+  }
+
   private _formatDate(iso: string): string {
     try {
       return new Date(iso).toLocaleDateString(undefined, {
@@ -394,12 +515,13 @@ export class SubscriberFeed extends LitElement {
     const isLocked = post.broadcast_price_cents != null && post.unlocked !== true
 
     // Locked broadcast: the blurred public preview behind the lock panel (real
-    // urls are withheld — the preview is the server-blurred transform).
+    // urls are withheld — the preview is the server-blurred transform). The
+    // preview opens the viewer too (with the preview url, blurred as-is).
     if (isLocked) {
       const preview = post.media.find((m) => m.preview_url)
       return html`
         <div class="media-stack">
-          <div class="locked-preview">
+          <div class="locked-preview" @click="${() => this._openViewer(post)}">
             ${preview
               ? html`<img
                   class="preview-img"
@@ -427,38 +549,110 @@ export class SubscriberFeed extends LitElement {
 
     // Regular / unlocked: real watermarked media via the secure content
     // endpoint where the feed sends urls; blurred previews where it withholds
-    // them (the non-follower teaser).
-    const withMedia = post.media.filter((m) => m.media_url)
-    const previews = post.media.filter((m) => m.preview_url)
-    return html`
-      <div class="media-stack">
-        ${withMedia.map(
-          (m) => html`<div class="media-item">
+    // them (the non-follower teaser). Multiple media render as a carousel
+    // (arrows + dots); every image opens the full-screen viewer.
+    const items = post.media.filter((m) => m.media_url || m.preview_url)
+    if (items.length === 0) return html``
+    if (items.length === 1) {
+      const m = items[0]
+      const url = m.media_url ?? m.preview_url
+      return html`
+        <div class="media-stack">
+          <div class="media-item" @click="${() => this._openViewer(post)}">
             <img
-              class="media-img"
-              src="${this._mediaUrl(m.media_url as string)}"
+              class="media-img ${m.media_url ? '' : 'preview-blur'}"
+              src="${this._mediaUrl(url as string)}"
               alt="Post media"
               loading="lazy"
             />
-          </div>`,
-        )}
-        ${previews.map(
-          (m) => html`<div class="media-item">
-            <img
-              class="media-img preview-blur"
-              src="${m.preview_url as string}"
-              alt=""
-              loading="lazy"
-            />
-          </div>`,
-        )}
-        ${post.broadcast_price_cents != null && post.unlocked === true
-          ? html`<div class="unlock-row">
-              <span class="unlocked-badge">✓ Unlocked</span>
-            </div>`
-          : nothing}
+          </div>
+          ${post.broadcast_price_cents != null && post.unlocked === true
+            ? html`<div class="unlock-row">
+                <span class="unlocked-badge">✓ Unlocked</span>
+              </div>`
+            : nothing}
+        </div>
+      `
+    }
+
+    return html`
+      <div class="carousel">
+        <div
+          class="carousel-track"
+          data-carousel-index="0"
+          @scroll="${(e: Event) => this._syncCarouselUI(e.currentTarget as HTMLElement)}"
+        >
+          ${items.map(
+            (m, i) => html`<div
+              class="carousel-slide"
+              @click="${() => this._openViewer(post, i)}"
+            >
+              <img
+                class="carousel-img ${m.media_url ? '' : 'preview-blur'}"
+                src="${this._mediaUrl((m.media_url ?? m.preview_url) as string)}"
+                alt="Post media ${i + 1}"
+                loading="lazy"
+              />
+            </div>`,
+          )}
+        </div>
+        <button
+          class="carousel-arrow prev"
+          aria-label="Previous media"
+          @click="${(e: MouseEvent) => this._carouselStep(e, -1)}"
+          >‹</button
+        >
+        <button
+          class="carousel-arrow next"
+          aria-label="Next media"
+          @click="${(e: MouseEvent) => this._carouselStep(e, 1)}"
+          >›</button
+        >
+        <div class="carousel-dots">
+          ${items.map(
+            (_, i) => html`<span
+              class="dot ${i === 0 ? 'active' : ''}"
+              data-carousel-dot="${i}"
+            ></span>`,
+          )}
+        </div>
+        <span class="carousel-count">1 / ${items.length}</span>
       </div>
     `
+  }
+
+  /** Step a post's carousel by ±1 (track scroll + dots + counter update). */
+  private _carouselStep(e: MouseEvent, dir: number) {
+    e.stopPropagation()
+    const track = (e.currentTarget as HTMLElement)
+      .closest('.carousel')
+      ?.querySelector('.carousel-track') as HTMLElement | null
+    if (!track) return
+    const slide = track.querySelector<HTMLElement>('.carousel-slide')
+    const step = slide ? slide.offsetWidth : 0
+    const target = Math.min(
+      Math.max(track.scrollLeft + dir * step, 0),
+      track.scrollWidth - track.clientWidth,
+    )
+    track.scrollTo({ left: target, behavior: 'smooth' })
+    this._syncCarouselUI(track)
+  }
+
+  /** Keep dots + counter in sync after a carousel scroll. */
+  private _syncCarouselUI(track: HTMLElement) {
+    const carousel = track.closest('.carousel') as HTMLElement | null
+    if (!carousel) return
+    const slides = Array.from(carousel.querySelectorAll<HTMLElement>('.carousel-slide'))
+    if (slides.length === 0) return
+    const index = Math.min(
+      Math.max(Math.round(track.scrollLeft / slides[0].offsetWidth), 0),
+      slides.length - 1,
+    )
+    carousel.querySelectorAll<HTMLElement>('.dot').forEach((dot, i) => {
+      dot.classList.toggle('active', i === index)
+    })
+    const count = carousel.querySelector<HTMLElement>('.carousel-count')
+    if (count) count.textContent = `${index + 1} / ${slides.length}`
   }
 
   render() {
@@ -517,6 +711,13 @@ export class SubscriberFeed extends LitElement {
             message="${this.toastMessage}"
             visible
           ></roque-toast>`
+        : nothing}
+      ${this.viewer
+        ? html`<roque-media-viewer
+            .urls="${this.viewer.urls}"
+            .index="${this.viewer.index}"
+            @aero-close="${() => (this.viewer = null)}"
+          ></roque-media-viewer>`
         : nothing}
     `
   }

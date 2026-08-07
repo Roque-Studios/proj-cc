@@ -2,7 +2,7 @@
 
 Covers: auth/role guards, the registry listing (per-field configured booleans,
 never secret values), the enable-validation rule (a gateway with incomplete
-config cannot be enabled), field-value validation (environments, payment day),
+config cannot be enabled), field-value validation (constrained environments),
 the merge semantics that preserve stored secrets on partial updates, and that
 secret values never leak into any response.
 """
@@ -83,13 +83,18 @@ def test_gateway_settings_listing_shape(client):
     assert gateways["mock"]["enabled"] is False
 
 
-def test_wompi_has_exactly_the_two_required_fields(client):
-    """Wompi enabling requires only WOMPI_CLIENT_ID + WOMPI_CLIENT_SECRET."""
+def test_wompi_has_the_three_required_fields(client):
+    """Wompi enabling requires the App ID, API Secret and the Webhook URL.
+
+    ``configuracion.urlWebhook`` is required at payment-link creation — Wompi
+    only notifies transactions through it, so a paid subscription could never
+    activate without it.
+    """
     headers = _register_and_apply(client, "creator@example.com")
     resp = client.get("/creator/gateway-settings", headers=headers)
     wompi = next(g for g in resp.json() if g["gateway"] == "wompi")
     required = [f["name"] for f in wompi["fields"] if f["required"]]
-    assert required == ["client_id", "client_secret"]
+    assert required == ["client_id", "client_secret", "webhook_url"]
 
 
 # --------------------------------------------------------------------------- #
@@ -143,13 +148,18 @@ def test_enable_stripe_with_full_config(client):
     assert by_name["api_base"]["configured"] is False
 
 
-def test_enable_wompi_with_two_variables(client):
+def test_enable_wompi_with_three_variables(client):
+    """Wompi enables with App ID + API Secret + Webhook URL."""
     headers = _register_and_apply(client, "creator@example.com")
     resp = client.put(
         "/creator/gateway-settings/wompi",
         json={
             "enabled": True,
-            "config": {"client_id": "app_abc", "client_secret": "secret_xyz"},
+            "config": {
+                "client_id": "app_abc",
+                "client_secret": "secret_xyz",
+                "webhook_url": "https://example.com/api/webhooks/wompi",
+            },
         },
         headers=headers,
     )
@@ -192,7 +202,7 @@ def test_paypal_environment_must_be_sandbox_or_live(client):
     assert "sandbox" in resp.json()["detail"]
 
 
-def test_wompi_environment_and_payment_day_validated(client):
+def test_wompi_environment_validated(client):
     headers = _register_and_apply(client, "creator@example.com")
     bad_env = client.put(
         "/creator/gateway-settings/wompi",
@@ -201,21 +211,48 @@ def test_wompi_environment_and_payment_day_validated(client):
             "config": {
                 "client_id": "a",
                 "client_secret": "b",
+                "webhook_url": "https://example.com/api/webhooks/wompi",
                 "environment": "moon",
             },
         },
         headers=headers,
     )
     assert bad_env.status_code == 400
-    bad_day = client.put(
+
+
+def test_non_secret_values_are_echoed_and_secrets_never(client):
+    """The form can pre-fill non-secret fields; secret values stay hidden.
+
+    ``value`` echoes stored **non-secret** config (e.g. the environment
+    select) so a save never silently resets it; secret keys always come back
+    ``None`` — only the ``configured`` boolean reveals they exist.
+    """
+    headers = _register_and_apply(client, "creator@example.com")
+    saved = client.put(
         "/creator/gateway-settings/wompi",
         json={
             "enabled": True,
-            "config": {"client_id": "a", "client_secret": "b", "dia_de_pago": 32},
+            "config": {
+                "client_id": "app_live_1",
+                "client_secret": "secret_live_1",
+                "webhook_url": "https://example.com/api/webhooks/wompi",
+                "environment": "production",
+            },
         },
         headers=headers,
     )
-    assert bad_day.status_code == 400
+    assert saved.status_code == 200
+
+    resp = client.get("/creator/gateway-settings", headers=headers)
+    wompi = next(g for g in resp.json() if g["gateway"] == "wompi")
+    fields = {f["name"]: f for f in wompi["fields"]}
+    # Non-secret stored value is echoed (select pre-fill).
+    assert fields["environment"]["value"] == "production"
+    # Secrets never leak — value is None, only the configured boolean.
+    assert fields["client_id"]["value"] is None
+    assert fields["client_secret"]["value"] is None
+    assert fields["client_id"]["configured"] is True
+    assert fields["client_secret"]["configured"] is True
 
 
 # --------------------------------------------------------------------------- #

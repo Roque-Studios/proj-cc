@@ -42,6 +42,53 @@ def test_new_user_has_no_creator_profile(client, db_session):
         assert db.query(CreatorProfile).count() == 0
 
 
+def test_get_or_create_profile_recovers_from_concurrent_create(db_session):
+    """Two concurrent requests creating the profile row must both succeed.
+
+    Regression: the admin settings page loads the profile and the messaging
+    settings concurrently — both create the profile row lazily, and the loser
+    of that race used to 500 (unique violation), which blanked the whole
+    gateway-settings tab. The helper must roll back and adopt the winner's
+    row instead.
+    """
+    from app.models import User, UserRole
+    from app.routers.creator import _get_or_create_profile
+
+    user = User(
+        email="race@example.com",
+        username="race",
+        hashed_password="not-used-in-tests",
+        role=UserRole.creator,
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    # The "winning" request already committed the profile row.
+    db_session.add(CreatorProfile(user_id=user.id, display_name="winner"))
+    db_session.commit()
+
+    # Simulate the losing request: its earlier SELECT saw no row (stale
+    # snapshot), so its INSERT collides with the winner's row and the helper
+    # must recover by re-selecting instead of raising IntegrityError.
+    real_scalar = db_session.scalar
+    calls = {"n": 0}
+
+    def stale_first(stmt):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return None  # the losing request's SELECT saw nothing
+        return real_scalar(stmt)
+
+    db_session.scalar = stale_first  # type: ignore[method-assign]
+
+    profile = _get_or_create_profile(db_session, user)
+    assert profile.user_id == user.id
+    assert profile.display_name == "winner"
+    assert calls["n"] >= 2
+
+
 # --------------------------------------------------------------------------- #
 # Creator-only access control
 # --------------------------------------------------------------------------- #

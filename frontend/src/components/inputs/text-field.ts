@@ -9,6 +9,9 @@ export class AeroTextField extends LitElement {
   // Input type ("text", "password", ...) — defaults to text so existing
   // usages are unchanged.
   @property({ type: String }) type = "text";
+  // Passed through to the inner <input> so password fields can opt out of
+  // browser password-manager autofill (e.g. "new-password").
+  @property({ type: String }) autocomplete = "";
   @property({ type: Boolean }) disabled = false;
   @property({ type: Boolean }) error = false;
 
@@ -118,6 +121,7 @@ export class AeroTextField extends LitElement {
             .value="${this.value}"
             placeholder="${this.placeholder}"
             ?disabled="${this.disabled}"
+            autocomplete="${this.autocomplete}"
             @input="${this._handleInput}"
           />
         </div>

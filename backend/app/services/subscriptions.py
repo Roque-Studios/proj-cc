@@ -120,6 +120,7 @@ class SubscriptionService:
         subscriber = self.db.get(User, subscriber_id)
         if subscriber is None:
             raise ValueError(f"Unknown subscriber: {subscriber_id}")
+        creator = self.db.get(User, creator_id)
 
         customer_ref = self._get_or_create_customer(subscriber)
         intent = SubscriptionIntent(
@@ -130,6 +131,10 @@ class SubscriptionService:
             metadata={
                 "subscriber_id": str(subscriber_id),
                 "creator_id": str(creator_id),
+                # The creator's username — Wompi's ``nombreProducto`` becomes
+                # "subscription to <username>" (the creator tag shown on the
+                # hosted page / Wompi dashboard).
+                "creator_username": creator.username if creator else None,
             },
             success_url=success_url,
             cancel_url=cancel_url,
@@ -278,29 +283,42 @@ class SubscriptionService:
             and event.customer_email
             and event.recurring
         ):
-            # Gateways whose recurring-charge events don't reference the ref we
-            # stored (e.g. Wompi recurring-link charges carry the suscripcion
-            # id, not the link id) match by the payer email instead: the user's
-            # latest non-terminal row for this provider. The event ref is NOT
-            # adopted — ``external_ref`` stays the gateway resource we created
-            # (the Wompi link id) so cancellation still targets the right link.
-            # Gated on ``event.recurring``: a provider's one-time purchase
-            # event (same email, no subscription ref) must never be reconciled
-            # against a subscription row — that would record a spurious monthly
-            # payment in the revenue ledger for what was a one-time unlock.
-            # Safe: only signature-verified events reach this point. Limitation
-            # (accepted, solo platform): with several non-terminal rows for one
-            # email the latest by id is chosen.
+            # Gateways whose subscription-charge events don't reference the ref
+            # we stored (e.g. Wompi payment-link charges carry the merchant ref
+            # + payer email, not the link id) match by the payer email instead:
+            # the user's latest non-terminal row for this provider. The event
+            # ref is NOT adopted — ``external_ref`` stays the gateway resource
+            # we created (the Wompi link id). Gated on ``event.recurring``: a
+            # provider's one-time purchase event (same email, no subscription
+            # ref) must never be reconciled against a subscription row — that
+            # would record a spurious monthly payment in the revenue ledger for
+            # what was a one-time unlock. Safe: only signature-verified events
+            # reach this point. Limitation (accepted, solo platform): with
+            # several non-terminal rows for one email the latest by id is
+            # chosen — unless the event pins the creator (see below).
             user = self.db.scalar(
                 select(User).where(User.email == event.customer_email)
             )
             if user is not None:
+                query = select(Subscription).where(
+                    Subscription.subscriber_id == user.id,
+                    Subscription.payment_provider == event.provider,
+                    Subscription.status.in_(_NON_TERMINAL),
+                )
+                # A Wompi payment-link event echoes the merchant reference
+                # (``identificadorEnlaceComercio`` = the creator id): pin the
+                # match to that creator so a subscriber with rows for several
+                # creators is reconciled to the one actually charged.
+                creator_ref = event.metadata.get("creator_id")
+                if creator_ref:
+                    try:
+                        query = query.where(
+                            Subscription.creator_id == int(creator_ref)
+                        )
+                    except (TypeError, ValueError):
+                        pass  # malformed ref — fall back to email-only matching
                 subscription = self.db.scalar(
-                    select(Subscription).where(
-                        Subscription.subscriber_id == user.id,
-                        Subscription.payment_provider == event.provider,
-                        Subscription.status.in_(_NON_TERMINAL),
-                    ).order_by(Subscription.id.desc())
+                    query.order_by(Subscription.id.desc())
                 )
         if subscription is None:
             # Unknown subscription (e.g. webhook arriving before our row, or a

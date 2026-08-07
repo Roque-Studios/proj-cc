@@ -123,7 +123,7 @@ def test_watermark_decodes_back_to_correct_pairing():
 
 
 # --------------------------------------------------------------------------- #
-# Legibility
+# Legibility + subtle corner placement
 # --------------------------------------------------------------------------- #
 
 def test_watermark_layer_has_legible_ink():
@@ -132,14 +132,33 @@ def test_watermark_layer_has_legible_ink():
 
     data = layer.getdata()  # RGBA tuples
     ink = sum(1 for r, g, b, a in data if a > 0)
-    # Tiled diagonal text at font size ~22 covers thousands of pixels.
-    assert ink > 2000
+    # A single small corner line (font ~14) — readable but modest ink coverage.
+    assert 200 < ink < 3000
 
     # Legible on any background: bright fill AND dark outline both present.
     bright = sum(1 for r, g, b, a in data if a > 0 and r > 200 and g > 200 and b > 200)
     dark = sum(1 for r, g, b, a in data if a > 0 and r < 80 and g < 80 and b < 80)
-    assert bright > 100
-    assert dark > 100
+    assert bright > 30
+    assert dark > 30
+
+
+def test_watermark_is_anchored_to_bottom_right_corner():
+    """The traceable line sits in the bottom-right corner, not spread across."""
+    width, height = 320, 240
+    layer = build_watermark_layer((width, height), "user:1", TS)
+    pixels = layer.load()
+
+    def has_ink(x0, y0, x1, y1) -> bool:
+        return any(
+            pixels[x, y][3] > 0
+            for x in range(x0, x1)
+            for y in range(y0, y1)
+        )
+
+    # Ink in the bottom-right quarter of the image.
+    assert has_ink(width // 2, height // 2, width, height)
+    # No ink in the top-left half — a subtle corner watermark, not a tiled one.
+    assert not has_ink(0, 0, width // 2, height // 2)
 
 
 # --------------------------------------------------------------------------- #

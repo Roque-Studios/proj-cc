@@ -1,6 +1,34 @@
 # Changelog
 
-## [0.21.0] - 2026-08-07
+## [0.25.0] - 2026-08-07
+### Added
+- **Media carousel**: posts with more than one photo now render as a swipeable/scrollable carousel (snap-scroll track, prev/next arrows, active dots + a "n / m" counter) instead of a vertical stack — in the subscriber feed on the home route and `/feed`
+- **Full-screen media viewer**: clicking a post's media (or a locked broadcast's blurred preview) opens a dark lightbox — zoom on click, prev/next + counter for multi-media, keyboard navigation (Esc / ← / →), close on backdrop click or ✕. Creator avatars on the landing page (`/`) and the feed page are clickable and open the same viewer
+### Changed
+- **Subtle watermark**: the dense diagonal tiled watermark is gone. The per-viewer traceable line (viewer + post hashes, UTC timestamp) is now small, semi-transparent text anchored to the image's **bottom-right corner** with a fixed margin — content stays clean while every served copy remains traceable (font capped at 36px, tuned down for small images)
+
+## [0.24.1] - 2026-08-07
+### Fixed
+- Every Wompi webhook failed signature verification (`Invalid webhook signature — possible spoof or incorrect API Secret`) even though the payment link's `configuracion.urlWebhook` was correct: nginx silently **drops request headers whose names contain underscores** (RFC 7230 forbids them, and nginx ignores them by default), so the `wompi_hash` header never reached the backend and the HMAC could never be verified. `frontend/nginx.conf` now sets `underscores_in_headers on;` — this also unblocks the mock gateway's `X-Mock-Signature` header for webhook testing through the proxy
+
+## [0.24.0] - 2026-08-07
+### Fixed
+- Wompi payment links were created **without `urlWebhook` / `urlRedirect`**, so a successful payment never reached the backend for reconciliation (the subscription stayed `incomplete` forever) and the customer had nowhere to return after paying. `create_subscription` now sends `configuracion.urlWebhook` (the backend's `POST /api/webhooks/wompi` — required, Wompi only notifies payment links through it; the gateway refuses to create a link without it) plus `urlRedirect` (the per-checkout success url, falling back to `WOMPI_REDIRECT_URL`) and `urlRetorno` (the cancel url)
+### Changed
+- Wompi webhook parser now understands the **real flat Wompi SV payment-link payload** (`ResultadoTransaccion` = "ExitosaAprobada" on success, `EnlacePago.Id` = the link id we stored, `EnlacePago.IdentificadorEnlaceComercio` = our creator id, `cliente.Email` = the payer) — the docs' shape, not the legacy nested `data.transaccion.estado` form (still parsed for compatibility). Reconciliation matches the echoed link id directly, else (creator, payer email) via the merchant reference
+- Gateway settings: Wompi gains a **required Webhook URL** field (`webhook_url`, non-secret, echoed back) and the env adds `WOMPI_WEBHOOK_URL` (also required, fail-fast) + `WOMPI_REDIRECT_URL`; `WOMPI_3DS_REDIRECT_URL` remains a legacy alias. The subscribe checkout passes its success/cancel urls through as the payment link's redirect targets
+
+## [0.23.0] - 2026-08-07
+### Fixed
+- Admin Settings tab could show **no gateway cards** on a fresh creator: the page loads the profile and messaging settings concurrently, both lazily create the `creator_profile` row, and the loser of that race got a 500 that blanked the whole view. `_get_or_create_profile` is now race-safe (rolls back and adopts the winner's row), `seed_creator` creates the profile up front, and the frontend loads the gateway cards independently of the profile/messaging panels so an unrelated failure can never hide them
+### Changed
+- Gateway keys are configured from the admin **Settings** tab exactly as before (strictly per-creator, no env fallback for checkout — saved configs drive activation): secret fields are now password-masked and non-secret stored values (e.g. the environment select) are echoed back via `GatewayFieldOut.value` and pre-filled, so a save never silently resets them
+
+## [0.22.0] - 2026-08-07
+### Changed
+- Wompi subscriptions now use hosted **one-time payment links** instead of the recurring-link endpoint (`EnlacePagoRecurrente` was creating bad states with no fix ETA): `create_subscription` calls `pywompi.WompiClient.create_payment_link` (`POST /EnlacePago`) with `identificadorEnlaceComercio` = the creator id and `nombreProducto` = "subscription to <creator username>" (the creator tag). The link id stays the `external_ref`; cancellation is local-only (a one-time link never auto-charges, so there is nothing to disable at Wompi)
+- Wompi webhook reconciliation now pins to the charged creator: `POST /api/webhooks/wompi` verifies the `wompi_hash` signature (`pywompi.parse_event`) and reconciles `APROBADA` transactions by the merchant reference (`identificadorEnlaceComercio` = creator id) + payer email — or directly by the echoed `idEnlace` — so a subscriber with rows for several creators is activated on the right one; one-time `TransaccionCompra` events still never reconcile as a monthly payment
+- Removed the dead recurring-link config: `WOMPI_DIA_DE_PAGO` setting, the Wompi "Charge day of month" gateway field, and the numeric-config coercion in the factory are gone
 ### Changed
 - Shared login page copy no longer mentions the creator dashboard (brand line reads "Sign in to subscribe to creators" and the role-redirect hint is gone); the landing page no longer shows a "Creator Landing" brand header
 - Avatars are now uploaded instead of pasting a URL: `POST/DELETE /creator/avatar` (validated, stored in the public avatar store, served via `GET /media/avatar/{key}` with the correct content type) with a roque-* upload UI (preview, replace, remove) in the admin Public profile card

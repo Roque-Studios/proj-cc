@@ -4,22 +4,28 @@ The real Wompi API is simulated with ``httpx.MockTransport`` injected into
 ``pywompi.WompiClient(http_client=...)``, so the provider's real request
 building, OAuth2 client-credentials auth, and webhook-signature validation
 (``wompi_hash`` = HMAC-SHA256 of the raw body with the API secret) run against
-a faithful fake of the Swagger (recurring links, tokenized transactions, 3DS).
+a faithful fake of the Swagger (payment links, tokenized transactions, 3DS).
 Covers the acceptance criteria:
 
-- subscribing creates an ``incomplete`` local row with the hosted recurring
-  link as checkout url (``external_ref`` = link id);
-- a signature-valid ``APROBADA`` webhook activates the subscription (matched
-  by the payer email, then adopted by ref for renewals) — the *sandbox
-  transaction completes and activates the Subscription* acceptance;
+- subscribing creates an ``incomplete`` local row with the hosted **payment
+  link** as checkout url (``external_ref`` = link id; the link carries our
+  creator id as ``identificadorEnlaceComercio``, ``nombreProducto`` =
+  "subscription to <creator tag>", and ``configuracion.urlWebhook`` /
+  ``urlRedirect`` so Wompi notifies us and returns the customer to checkout);
+- a signature-valid webhook activates the subscription — the flat Wompi SV
+  payment-link payload (``ResultadoTransaccion`` / ``EnlacePago`` /
+  ``cliente.Email``) matched directly by the echoed link id, otherwise by
+  (creator, payer email) via the merchant reference — the *sandbox transaction
+  completes and activates the Subscription* acceptance;
 - forged signatures are rejected before anything is processed;
-- renewals reconcile by the adopted suscripcion ref; failures move to
-  ``past_due``;
-- one-time (tokenized, no 3DS) and 3DS redirect charges work.
+- the legacy nested ``data.transaccion.estado`` webhook shape still parses;
+- renewals reconcile for the same creator; failures move to ``past_due``;
+- one-time (tokenized, no 3DS) and 3DS redirect charges work, and a one-time
+  transaction webhook never reconciles as a monthly payment.
 
 A real-sandbox test (``test_wompi_sandbox_subscribe_flow``) runs only when
 ``WOMPI_CLIENT_ID`` / ``WOMPI_CLIENT_SECRET`` are provided **and**
-``RUN_WOMPI_SANDBOX=1``; it creates a real recurring link and asserts the
+``RUN_WOMPI_SANDBOX=1``; it creates a real payment link and asserts the
 local row, leaving the hosted payment + webhook activation to the simulated
 tests above.
 """
@@ -39,6 +45,7 @@ from app.models import ProcessedWebhookEvent, Subscription, SubscriptionStatus, 
 from app.payments import (
     ChargeRequest,
     PaymentProviderError,
+    ProviderConfigurationError,
     WebhookVerificationError,
 )
 from app.payments.wompi import WompiPaymentProvider
@@ -46,6 +53,8 @@ from app.services.subscriptions import SubscriptionService
 
 WOMPI_CLIENT_ID = "app_wompi_test"
 WOMPI_CLIENT_SECRET = "wompi_api_secret_test"
+WOMPI_WEBHOOK_URL = "https://example.com/api/webhooks/wompi"
+WOMPI_REDIRECT_URL = "https://example.com/checkout"
 
 
 # --------------------------------------------------------------------------- #
@@ -53,10 +62,10 @@ WOMPI_CLIENT_SECRET = "wompi_api_secret_test"
 # --------------------------------------------------------------------------- #
 
 class FakeWompiAPI:
-    """In-memory Wompi: OAuth, recurring links, tokenized/3DS transactions."""
+    """In-memory Wompi: OAuth, payment links, tokenized/3DS transactions."""
 
     def __init__(self) -> None:
-        self.links: dict[str, dict] = {}
+        self.links: dict[int, dict] = {}
         self.transactions: dict[str, dict] = {}
         self.approve_next_charge = True
         self._seq = 0
@@ -72,39 +81,30 @@ class FakeWompiAPI:
                     "expires_in": 3600,
                 },
             )
-        if request.method == "POST" and path == "/EnlacePagoRecurrente":
-            return self._create_recurring_link(request)
-        if request.method == "POST" and path.startswith("/EnlacePagoRecurrente/"):
-            return self._disable_recurring_link(request)
+        if request.method == "POST" and path == "/EnlacePago":
+            return self._create_payment_link(request)
         if request.method == "POST" and path == "/TransaccionCompra/TokenizadaSin3Ds":
             return self._tokenized_charge(request)
         if request.method == "POST" and path == "/TransaccionCompra/3Ds":
             return self._charge_3ds(request)
         return httpx.Response(404, text='{"mensaje": "not found"}')
 
-    def _create_recurring_link(self, request: httpx.Request) -> httpx.Response:
+    def _create_payment_link(self, request: httpx.Request) -> httpx.Response:
         self._seq += 1
         body = json.loads(request.content)
-        link_id = f"ENLACE-{self._seq}"
+        link_id = self._seq  # real Wompi link ids are integers
         link = {
             "idEnlace": link_id,
-            "nombre": body.get("nombre"),
+            "identificadorEnlaceComercio": body.get("identificadorEnlaceComercio"),
+            "nombreProducto": body.get("nombreProducto"),
             "monto": body.get("monto"),
-            "diaDePago": body.get("diaDePago"),
-            "descripcionProducto": body.get("descripcionProducto"),
-            "estaProductivo": True,
+            "configuracion": body.get("configuracion"),
             "urlEnlace": f"https://wompi.sv/pagar/{link_id}",
             "urlEnlaceLargo": f"https://wompi.sv/pagar/largo/{link_id}",
+            "urlQrCodeEnlace": f"https://wompi.sv/qr/{link_id}",
         }
         self.links[link_id] = link
         return httpx.Response(200, json=link)
-
-    def _disable_recurring_link(self, request: httpx.Request) -> httpx.Response:
-        link_id = request.url.path.split("/")[-1]
-        if link_id not in self.links:
-            return httpx.Response(404, text='{"mensaje": "not found"}')
-        self.links[link_id]["estaProductivo"] = False
-        return httpx.Response(204)
 
     def _tokenized_charge(self, request: httpx.Request) -> httpx.Response:
         self._seq += 1
@@ -142,20 +142,51 @@ def _wompi_provider(fake_api: FakeWompiAPI, **overrides) -> WompiPaymentProvider
         "client_secret": WOMPI_CLIENT_SECRET,
         "environment": "sandbox",
         "tier_price_cents": 500,
+        "webhook_url": WOMPI_WEBHOOK_URL,
+        "redirect_url": WOMPI_REDIRECT_URL,
         "http_client": httpx.Client(transport=httpx.MockTransport(fake_api.handle)),
     }
     kwargs.update(overrides)
     return WompiPaymentProvider(**kwargs)
 
 
-def _wompi_transaction_event(
+def _wompi_payment_link_event(
+    *,
+    resultado: str = "ExitosaAprobada",
+    email: str,
+    id_transaccion: str,
+    id_enlace: int | None = None,
+    identificador_enlace: str | None = None,
+) -> bytes:
+    """The flat Wompi SV payment-link webhook body (official docs shape)."""
+    payload: dict = {
+        "IdCuenta": "acct_1",
+        "FechaTransaccion": "2026-08-07T12:00:00-06:00",
+        "Monto": 5.0,
+        "ModuloUtilizado": "BotonPago",
+        "IdTransaccion": id_transaccion,
+        "ResultadoTransaccion": resultado,
+        "Cantidad": 1,
+        "EsProductiva": False,
+        "cliente": {"Nombre": "Fan", "Email": email},
+    }
+    if id_enlace is not None or identificador_enlace is not None:
+        payload["EnlacePago"] = {
+            "Id": id_enlace,
+            "IdentificadorEnlaceComercio": identificador_enlace,
+            "NombreProducto": "subscription to creator",
+        }
+    return json.dumps(payload).encode()
+
+
+def _wompi_legacy_event(
     *,
     estado: str,
     email: str,
     id_transaccion: str,
     id_suscripcion: str | None = None,
-    id_externo: str | None = None,
 ) -> bytes:
+    """The legacy nested ``data.transaccion.estado`` webhook shape."""
     tx: dict = {
         "estado": estado,
         "idTransaccion": id_transaccion,
@@ -164,8 +195,6 @@ def _wompi_transaction_event(
     }
     if id_suscripcion:
         tx["idSuscripcion"] = id_suscripcion
-    if id_externo:
-        tx["idExterno"] = id_externo
     return json.dumps({"data": {"transaccion": tx}}).encode()
 
 
@@ -203,8 +232,8 @@ def _subscribe(db, provider):
         subscriber.id,
         creator.id,
         plan_id="unused-for-wompi",
-        success_url="https://example.com/success",
-        cancel_url="https://example.com/cancel",
+        success_url=WOMPI_REDIRECT_URL,
+        cancel_url=WOMPI_REDIRECT_URL,
     )
     db.refresh(subscription)
     assert subscription.status == SubscriptionStatus.incomplete
@@ -212,7 +241,7 @@ def _subscribe(db, provider):
 
 
 # --------------------------------------------------------------------------- #
-# Subscribe flow: per-subscription recurring link
+# Subscribe flow: per-subscription hosted payment link
 # --------------------------------------------------------------------------- #
 
 def test_wompi_subscribe_creates_pending_subscription_with_link(db_session):
@@ -224,25 +253,57 @@ def test_wompi_subscribe_creates_pending_subscription_with_link(db_session):
 
         assert subscription.payment_provider == "wompi"
         assert subscription.status == SubscriptionStatus.incomplete
-        assert link_id.startswith("ENLACE-")
+        assert link_id.isdigit()
         assert subscription.checkout_url.startswith("https://wompi.sv/pagar/")
 
-        # The gateway link carries the monthly price + billing day + a
-        # subscriber-tagged name (support traceability).
-        link = fake_api.links[link_id]
+        # The gateway payment link carries the merchant reference (our creator
+        # id), the product name ("subscription to <creator tag>"), the price —
+        # and the webhook + redirect so Wompi notifies the backend and returns
+        # the customer to the checkout page after paying.
+        creator = db.get(User, subscription.creator_id)
+        link = fake_api.links[int(link_id)]
+        assert link["identificadorEnlaceComercio"] == str(subscription.creator_id)
+        assert link["nombreProducto"] == f"subscription to {creator.username}"
         assert link["monto"] == 5.0
-        assert link["diaDePago"] == 1
-        assert link["nombre"] == f"CCE-{subscription.subscriber_id}"
+        configuracion = link["configuracion"]
+        assert configuracion["urlWebhook"] == WOMPI_WEBHOOK_URL
+        assert configuracion["urlRedirect"] == WOMPI_REDIRECT_URL
+        assert configuracion["notificarTransaccionCliente"] is True
 
 
-def test_wompi_subscribe_uses_configured_dia_de_pago(db_session):
+def test_wompi_subscribe_uses_configured_price(db_session):
     fake_api = FakeWompiAPI()
-    provider = _wompi_provider(fake_api, dia_de_pago=15, tier_price_cents=900)
+    provider = _wompi_provider(fake_api, tier_price_cents=900)
     with db_session as db:
         subscription, _, link_id = _subscribe(db, provider)
-        link = fake_api.links[link_id]
-        assert link["diaDePago"] == 15
-        assert link["monto"] == 9.0
+        assert fake_api.links[int(link_id)]["monto"] == 9.0
+
+
+def test_wompi_subscribe_uses_configured_redirect_fallback(db_session):
+    """Without a per-checkout success url the configured redirect is used."""
+    fake_api = FakeWompiAPI()
+    provider = _wompi_provider(fake_api, redirect_url="https://example.com/return")
+    with db_session as db:
+        subscriber, creator = _create_users(db)
+        service = SubscriptionService(db, provider=provider)
+        subscription = service.create_subscription(
+            subscriber.id, creator.id, plan_id="unused-for-wompi"
+        )
+        link = fake_api.links[int(subscription.external_ref)]
+        assert link["configuracion"]["urlRedirect"] == "https://example.com/return"
+
+
+def test_wompi_subscribe_requires_webhook_url(db_session):
+    """A payment link without a webhook url can never be reconciled — fail fast."""
+    fake_api = FakeWompiAPI()
+    provider = _wompi_provider(fake_api, webhook_url="")
+    with db_session as db:
+        subscriber, creator = _create_users(db)
+        service = SubscriptionService(db, provider=provider)
+        with pytest.raises(ProviderConfigurationError):
+            service.create_subscription(
+                subscriber.id, creator.id, plan_id="unused-for-wompi"
+            )
 
 
 # --------------------------------------------------------------------------- #
@@ -252,33 +313,59 @@ def test_wompi_subscribe_uses_configured_dia_de_pago(db_session):
 def test_wompi_webhook_valid_signature_normalizes_event():
     fake_api = FakeWompiAPI()
     provider = _wompi_provider(fake_api)
-    body = _wompi_transaction_event(
-        estado="APROBADA",
+    body = _wompi_payment_link_event(
         email="fan@example.com",
         id_transaccion="SV-1",
+        id_enlace=15,
+        identificador_enlace="42",
+    )
+    event = provider.verify_webhook(body, _signed_headers(body))
+    assert event.event_type.value == "payment.succeeded"
+    assert event.external_ref == "15"  # the echoed link id
+    assert event.customer_email == "fan@example.com"
+    assert event.subscription_status == "active"
+    assert event.recurring is True
+    assert event.metadata["creator_id"] == "42"
+
+
+def test_wompi_webhook_legacy_shape_still_supported():
+    """The old ``data.transaccion.estado`` shape keeps parsing."""
+    fake_api = FakeWompiAPI()
+    provider = _wompi_provider(fake_api)
+    body = _wompi_legacy_event(
+        estado="APROBADA", email="fan@example.com", id_transaccion="SV-1",
         id_suscripcion="SUS-1",
     )
     event = provider.verify_webhook(body, _signed_headers(body))
     assert event.event_type.value == "payment.succeeded"
     assert event.external_ref == "SUS-1"
     assert event.customer_email == "fan@example.com"
-    assert event.subscription_status == "active"
 
 
 def test_wompi_webhook_forged_signature_rejected():
     fake_api = FakeWompiAPI()
     provider = _wompi_provider(fake_api)
-    body = _wompi_transaction_event(
-        estado="APROBADA", email="fan@example.com", id_transaccion="SV-1"
+    body = _wompi_payment_link_event(
+        email="fan@example.com", id_transaccion="SV-1", id_enlace=15
     )
     with pytest.raises(WebhookVerificationError):
         provider.verify_webhook(body, {"wompi_hash": "0" * 64})
 
 
-def test_wompi_webhook_unknown_estado_rejected():
+def test_wompi_webhook_without_result_rejected():
     fake_api = FakeWompiAPI()
     provider = _wompi_provider(fake_api)
-    body = _wompi_transaction_event(
+    body = json.dumps(
+        {"IdTransaccion": "SV-1", "cliente": {"Email": "fan@example.com"}}
+    ).encode()
+    with pytest.raises(WebhookVerificationError):
+        provider.verify_webhook(body, _signed_headers(body))
+
+
+def test_wompi_webhook_unknown_legacy_estado_rejected():
+    fake_api = FakeWompiAPI()
+    provider = _wompi_provider(fake_api)
+    body = _wompi_legacy_event(
         estado="PENDIENTE", email="fan@example.com", id_transaccion="SV-1"
     )
     with pytest.raises(WebhookVerificationError):
@@ -289,8 +376,8 @@ def test_wompi_webhook_rejected_by_router(client, db_session, monkeypatch):
     """An invalid signature is a 400 at the endpoint, never reconciled."""
     monkeypatch.setattr(settings, "WOMPI_CLIENT_ID", WOMPI_CLIENT_ID)
     monkeypatch.setattr(settings, "WOMPI_CLIENT_SECRET", WOMPI_CLIENT_SECRET)
-    body = _wompi_transaction_event(
-        estado="APROBADA", email="fan@example.com", id_transaccion="SV-1"
+    body = _wompi_payment_link_event(
+        email="fan@example.com", id_transaccion="SV-1", id_enlace=15
     )
     headers = {"wompi_hash": "forged", "Content-Type": "application/json"}
     resp = client.post("/webhooks/wompi", data=body, headers=headers)
@@ -301,13 +388,8 @@ def test_wompi_webhook_rejected_by_router(client, db_session, monkeypatch):
 # Acceptance: a completed sandbox transaction activates the Subscription
 # --------------------------------------------------------------------------- #
 
-def test_wompi_webhook_activates_subscription_by_email(db_session):
-    """APROBADA webhook -> the pending subscription becomes active.
-
-    The recurring-charge event carries the suscripcion ref + payer email, not
-    the link id we stored: the service matches by email. ``external_ref`` stays
-    the link id — that is the resource cancellation disables.
-    """
+def test_wompi_webhook_activates_subscription_by_link_ref(db_session):
+    """The flat webhook echoes the link id -> the stored ref matches directly."""
     fake_api = FakeWompiAPI()
     provider = _wompi_provider(fake_api)
 
@@ -315,17 +397,17 @@ def test_wompi_webhook_activates_subscription_by_email(db_session):
         subscription, email, link_id = _subscribe(db, provider)
         service = SubscriptionService(db, provider=provider)
 
-        body = _wompi_transaction_event(
-            estado="APROBADA",
+        body = _wompi_payment_link_event(
             email=email,
             id_transaccion="SV-1",
-            id_suscripcion="SUS-1",
+            id_enlace=int(link_id),
+            identificador_enlace=str(subscription.creator_id),
         )
         event = service.handle_webhook(body, _signed_headers(body))
         assert event.duplicate is False
         db.refresh(subscription)
         assert subscription.status == SubscriptionStatus.active
-        assert subscription.external_ref == link_id  # link id kept for cancel
+        assert subscription.external_ref == link_id  # link id kept
         assert subscription.checkout_url is None
 
         # Redelivery of the same transaction is acked as duplicate.
@@ -340,15 +422,100 @@ def test_wompi_webhook_activates_subscription_by_email(db_session):
         assert len(markers) == 1
 
 
-def test_wompi_one_time_charge_event_never_reconciles_as_monthly(db_session):
-    """A one-time purchase event (email, no subscription ref) is ignored.
+def test_wompi_webhook_activates_subscription_by_creator_and_email(db_session):
+    """APROBADA webhook -> the pending subscription becomes active.
 
-    ``TransaccionCompra`` events carry the payer email but no
-    ``idSuscripcion``: without the ``recurring`` gate the email fallback would
-    reconcile the one-time unlock against the subscriber's active subscription
-    and record a spurious *monthly* payment in the revenue ledger. The event
-    must be a no-op instead — the subscription stays untouched and no
-    ``Payment`` row is written.
+    When Wompi omits the link id from the event, the merchant reference (our
+    creator id) + payer email match the right row. ``external_ref`` stays the
+    link id.
+    """
+    fake_api = FakeWompiAPI()
+    provider = _wompi_provider(fake_api)
+
+    with db_session as db:
+        subscription, email, link_id = _subscribe(db, provider)
+        service = SubscriptionService(db, provider=provider)
+
+        body = _wompi_payment_link_event(
+            email=email,
+            id_transaccion="SV-1",
+            identificador_enlace=str(subscription.creator_id),
+        )
+        event = service.handle_webhook(body, _signed_headers(body))
+        assert event.duplicate is False
+        db.refresh(subscription)
+        assert subscription.status == SubscriptionStatus.active
+        assert subscription.external_ref == link_id
+
+
+def test_wompi_payment_link_event_activates_the_right_creator(db_session):
+    """The merchant ref pins reconciliation to the charged creator.
+
+    A subscriber with pending rows for two creators gets only the charged
+    creator's row activated — without the creator pin the email fallback
+    would pick the latest non-terminal row (the wrong creator).
+    """
+    fake_api = FakeWompiAPI()
+    provider = _wompi_provider(fake_api)
+
+    with db_session as db:
+        subscriber = User(
+            email="wompi-sub@example.com",
+            username="wompi-sub",
+            hashed_password="not-used-in-tests",
+            role=UserRole.registered,
+            is_active=True,
+        )
+        creator_a = User(
+            email="wompi-a@example.com",
+            username="wompi-a",
+            hashed_password="not-used-in-tests",
+            role=UserRole.creator,
+            is_active=True,
+        )
+        creator_b = User(
+            email="wompi-b@example.com",
+            username="wompi-b",
+            hashed_password="not-used-in-tests",
+            role=UserRole.creator,
+            is_active=True,
+        )
+        db.add_all([subscriber, creator_a, creator_b])
+        db.commit()
+        db.refresh(subscriber)
+        db.refresh(creator_a)
+        db.refresh(creator_b)
+
+        service = SubscriptionService(db, provider=provider)
+        sub_a = service.create_subscription(
+            subscriber.id, creator_a.id, plan_id="unused-for-wompi"
+        )
+        sub_b = service.create_subscription(
+            subscriber.id, creator_b.id, plan_id="unused-for-wompi"
+        )
+        assert sub_a.id < sub_b.id  # creator_a is the older row
+
+        body = _wompi_payment_link_event(
+            email=subscriber.email,
+            id_transaccion="SV-1",
+            identificador_enlace=str(creator_a.id),
+        )
+        service.handle_webhook(body, _signed_headers(body))
+        db.refresh(sub_a)
+        db.refresh(sub_b)
+        assert sub_a.status == SubscriptionStatus.active
+        assert sub_b.status == SubscriptionStatus.incomplete
+
+
+def test_wompi_one_time_charge_event_never_reconciles_as_monthly(db_session):
+    """A one-time API-transaction webhook (no EnlacePago block) is ignored.
+
+    ``TransaccionCompra`` webhooks carry the payer email but no ``EnlacePago``
+    block: without the ``recurring`` gate the email fallback would reconcile
+    the one-time unlock against the subscriber's active subscription and
+    record a spurious *monthly* payment in the revenue ledger. The event must
+    be a no-op instead — the subscription stays untouched and no ``Payment``
+    row is written.
     """
     from app.models import Payment
 
@@ -358,18 +525,20 @@ def test_wompi_one_time_charge_event_never_reconciles_as_monthly(db_session):
     with db_session as db:
         subscription, email, link_id = _subscribe(db, provider)
         service = SubscriptionService(db, provider=provider)
-        first = _wompi_transaction_event(
-            estado="APROBADA", email=email, id_transaccion="SV-1", id_suscripcion="SUS-1"
+        first = _wompi_payment_link_event(
+            email=email,
+            id_transaccion="SV-1",
+            identificador_enlace=str(subscription.creator_id),
         )
         service.handle_webhook(first, _signed_headers(first))
         db.refresh(subscription)
         assert subscription.status == SubscriptionStatus.active
-        # The recurring activation legitimately records the first month.
+        # The activation legitimately records the first month.
         assert len(db.scalars(select(Payment)).all()) == 1
 
-        # One-time unlock charge webhook: same payer email, no subscription ref.
-        one_time = _wompi_transaction_event(
-            estado="APROBADA", email=email, id_transaccion="SV-100"
+        # One-time unlock charge webhook: same payer email, no EnlacePago block.
+        one_time = _wompi_payment_link_event(
+            email=email, id_transaccion="SV-100"
         )
         event = service.handle_webhook(one_time, _signed_headers(one_time))
         db.refresh(subscription)
@@ -380,10 +549,10 @@ def test_wompi_one_time_charge_event_never_reconciles_as_monthly(db_session):
         assert len(db.scalars(select(Payment)).all()) == 1
 
 
-def test_wompi_renewal_reconciles_by_email_fallback(db_session):
-    """A later renewal (new transaction, same subscriber) stays active.
+def test_wompi_renewal_reconciles_by_creator_and_email(db_session):
+    """A later payment (new transaction, same subscriber+creator) stays active.
 
-    The active row is matched by the payer email (non-terminal statuses); the
+    The active row is matched by (merchant ref, payer email); the
     external_ref remains the link id throughout.
     """
     fake_api = FakeWompiAPI()
@@ -392,15 +561,19 @@ def test_wompi_renewal_reconciles_by_email_fallback(db_session):
     with db_session as db:
         subscription, email, link_id = _subscribe(db, provider)
         service = SubscriptionService(db, provider=provider)
-        first = _wompi_transaction_event(
-            estado="APROBADA", email=email, id_transaccion="SV-1", id_suscripcion="SUS-1"
+        first = _wompi_payment_link_event(
+            email=email,
+            id_transaccion="SV-1",
+            identificador_enlace=str(subscription.creator_id),
         )
         service.handle_webhook(first, _signed_headers(first))
         db.refresh(subscription)
         assert subscription.status == SubscriptionStatus.active
 
-        renewal = _wompi_transaction_event(
-            estado="APROBADA", email=email, id_transaccion="SV-2", id_suscripcion="SUS-1"
+        renewal = _wompi_payment_link_event(
+            email=email,
+            id_transaccion="SV-2",
+            identificador_enlace=str(subscription.creator_id),
         )
         event = service.handle_webhook(renewal, _signed_headers(renewal))
         assert event.duplicate is False
@@ -421,15 +594,20 @@ def test_wompi_rejected_webhook_moves_active_to_past_due(db_session, monkeypatch
     with db_session as db:
         subscription, email, _ = _subscribe(db, provider)
         service = SubscriptionService(db, provider=provider)
-        approved = _wompi_transaction_event(
-            estado="APROBADA", email=email, id_transaccion="SV-1", id_suscripcion="SUS-1"
+        approved = _wompi_payment_link_event(
+            email=email,
+            id_transaccion="SV-1",
+            identificador_enlace=str(subscription.creator_id),
         )
         service.handle_webhook(approved, _signed_headers(approved))
         db.refresh(subscription)
         assert subscription.status == SubscriptionStatus.active
 
-        rejected = _wompi_transaction_event(
-            estado="RECHAZADA", email=email, id_transaccion="SV-2", id_suscripcion="SUS-1"
+        rejected = _wompi_payment_link_event(
+            resultado="Rechazada",
+            email=email,
+            id_transaccion="SV-2",
+            identificador_enlace=str(subscription.creator_id),
         )
         service.handle_webhook(rejected, _signed_headers(rejected))
         db.refresh(subscription)
@@ -437,43 +615,43 @@ def test_wompi_rejected_webhook_moves_active_to_past_due(db_session, monkeypatch
         assert notifications == [subscription.id]
 
 
-def test_wompi_cancel_disables_link_and_marks_canceled(db_session):
-    fake_api = FakeWompiAPI()
-    provider = _wompi_provider(fake_api)
+def test_wompi_cancel_marks_subscription_canceled_locally(db_session):
+    """One-time links can't re-charge — cancel is local-only.
 
-    with db_session as db:
-        subscription, _, link_id = _subscribe(db, provider)
-        service = SubscriptionService(db, provider=provider)
-
-        service.cancel_subscription(subscription)
-        assert fake_api.links[link_id]["estaProductivo"] is False
-        db.refresh(subscription)
-        assert subscription.status == SubscriptionStatus.canceled
-
-
-def test_wompi_cancel_after_activation_still_disables_the_link(db_session):
-    """Regression: activating via webhook must not break later cancellation.
-
-    The email-fallback match must NOT adopt the suscripcion ref over the link
-    id — cancellation disables ``/EnlacePagoRecurrente/{link_id}`` and would
-    404 if the ref were the suscripcion id.
+    There is no recurring charge at the provider to disable, so cancellation
+    only marks the local row canceled (no provider call happens).
     """
     fake_api = FakeWompiAPI()
     provider = _wompi_provider(fake_api)
 
     with db_session as db:
-        subscription, email, link_id = _subscribe(db, provider)
+        subscription, _, _ = _subscribe(db, provider)
         service = SubscriptionService(db, provider=provider)
 
-        approved = _wompi_transaction_event(
-            estado="APROBADA", email=email, id_transaccion="SV-1", id_suscripcion="SUS-1"
+        service.cancel_subscription(subscription)
+        db.refresh(subscription)
+        assert subscription.status == SubscriptionStatus.canceled
+
+
+def test_wompi_cancel_after_activation_marks_subscription_canceled(db_session):
+    """Activating via webhook must not break later cancellation."""
+    fake_api = FakeWompiAPI()
+    provider = _wompi_provider(fake_api)
+
+    with db_session as db:
+        subscription, email, _ = _subscribe(db, provider)
+        service = SubscriptionService(db, provider=provider)
+
+        approved = _wompi_payment_link_event(
+            email=email,
+            id_transaccion="SV-1",
+            identificador_enlace=str(subscription.creator_id),
         )
         service.handle_webhook(approved, _signed_headers(approved))
         db.refresh(subscription)
         assert subscription.status == SubscriptionStatus.active
 
         service.cancel_subscription(subscription)
-        assert fake_api.links[link_id]["estaProductivo"] is False
         db.refresh(subscription)
         assert subscription.status == SubscriptionStatus.canceled
 
@@ -588,7 +766,7 @@ _REQUIRE_SANDBOX = os.environ.get("RUN_WOMPI_SANDBOX") == "1"
     ),
 )
 def test_wompi_sandbox_subscribe_flow(db_session):
-    """Real sandbox: create a recurring link + subscription against api.wompi.sv.
+    """Real sandbox: create a payment link + subscription against api.wompi.sv.
 
     Assertions stop at the pending row + hosted link — the payment is a
     human/browser step on Wompi's page; once paid, the webhook pipeline tested
@@ -599,18 +777,21 @@ def test_wompi_sandbox_subscribe_flow(db_session):
         client_secret=os.environ["WOMPI_CLIENT_SECRET"],
         environment="sandbox",
         tier_price_cents=settings.SUBSCRIPTION_TIER_PRICE_CENTS,
-        dia_de_pago=settings.WOMPI_DIA_DE_PAGO,
+        webhook_url=settings.WOMPI_WEBHOOK_URL,
+        redirect_url=settings.WOMPI_REDIRECT_URL or settings.WOMPI_3DS_REDIRECT_URL,
     )
     try:
         with db_session as db:
             subscription, email, link_id = _subscribe(db, provider)
             assert subscription.payment_provider == "wompi"
-            assert link_id.startswith("ENLACE-")
+            assert str(link_id).isdigit()
             assert "wompi.sv" in subscription.checkout_url
             print(
-                f"\n[wompi sandbox] customer subscribes at: {subscription.checkout_url}\n"
-                f"[wompi sandbox] configure the webhook POST /api/webhooks/wompi in the\n"
-                f"[wompi sandbox] dashboard; Wompi signs events with the wompi_hash header."
+                f"\n[wompi sandbox] customer pays at: {subscription.checkout_url}\n"
+                f"[wompi sandbox] register the webhook POST /api/webhooks/wompi in the\n"
+                f"[wompi sandbox] dashboard (or set WOMPI_WEBHOOK_URL so payment links\n"
+                f"[wompi sandbox] carry it in configuracion.urlWebhook); Wompi signs\n"
+                f"[wompi sandbox] events with the wompi_hash header."
             )
     finally:
         provider._client.close()
