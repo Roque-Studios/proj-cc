@@ -512,7 +512,10 @@ export class SubscriberFeedPage extends LitElement {
           : nothing}
 
         ${isFollower
-          ? html`<roque-subscriber-feed creator-id="${this.creatorId}"></roque-subscriber-feed>`
+          ? html`<roque-subscriber-feed
+              creator-id="${this.creatorId}"
+              user-id="${this.me?.id ?? ''}"
+            ></roque-subscriber-feed>`
           : html`<roque-card>
               <div class="prompt">
                 ${isAnonymous

@@ -132,6 +132,8 @@ export interface CreatorPost {
   media_count: number
   view_count: number
   unlock_count: number
+  like_count: number
+  comment_count: number
   media: CreatorMedia[]
 }
 
@@ -219,8 +221,38 @@ export interface FeedPost {
   broadcast_price_cents: number | null
   unlocked: boolean | null
   media: CreatorMedia[]
+  // Engagement totals (public on every post) + the viewer's own like state.
+  like_count: number
+  comment_count: number
+  liked_by_me: boolean
   created_at: string
   updated_at: string
+}
+
+export interface PostComment {
+  id: number
+  post_id: number
+  user_id: number
+  body: string
+  author_username: string | null
+  author_display_name: string | null
+  author_avatar_url: string | null
+  author_is_creator: boolean
+  created_at: string
+}
+
+export interface CommentsPage {
+  items: PostComment[]
+  page: number
+  page_size: number
+  total: number
+  has_more: boolean
+}
+
+export interface PostLikeResponse {
+  post_id: number
+  liked: boolean
+  like_count: number
 }
 
 export interface FeedResponse {
@@ -556,6 +588,37 @@ export const api = {
       page_size: String(pageSize),
     })
     return request<FeedResponse>(`/creators/${creatorId}/posts?${params.toString()}`)
+  },
+
+  // ---- Post engagement (likes + comments) ----
+
+  likePost(postId: number): Promise<PostLikeResponse> {
+    return request<PostLikeResponse>(`/posts/${postId}/like`, { method: 'POST' })
+  },
+
+  unlikePost(postId: number): Promise<PostLikeResponse> {
+    return request<PostLikeResponse>(`/posts/${postId}/like`, { method: 'DELETE' })
+  },
+
+  getPostComments(postId: number, page = 1, pageSize = 20): Promise<CommentsPage> {
+    const params = new URLSearchParams({
+      page: String(page),
+      page_size: String(pageSize),
+    })
+    return request<CommentsPage>(`/posts/${postId}/comments?${params.toString()}`)
+  },
+
+  createPostComment(postId: number, body: string): Promise<PostComment> {
+    return request<PostComment>(`/posts/${postId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ body }),
+    })
+  },
+
+  deletePostComment(postId: number, commentId: number): Promise<void> {
+    return request<void>(`/posts/${postId}/comments/${commentId}`, {
+      method: 'DELETE',
+    })
   },
 
   subscribe(

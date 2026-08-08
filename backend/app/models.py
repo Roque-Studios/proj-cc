@@ -234,6 +234,18 @@ class Post(Base):
         # FK has ON DELETE CASCADE: post deletion is delegated to the DB.
         passive_deletes=True,
     )
+    likes = relationship(
+        "PostLike",
+        back_populates="post",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    comments = relationship(
+        "PostComment",
+        back_populates="post",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 class PostMedia(Base):
@@ -270,6 +282,72 @@ class PostMedia(Base):
         key itself is never part of any URL.
         """
         return f"/content/{self.post_id}/media?media_id={self.id}"
+
+
+class PostLike(Base):
+    """A subscriber's like on a post.
+
+    One row per (post, user): liking twice is idempotent (the unique pair is
+    enforced), so the client toggles by inserting/removing this row. Likes
+    follow the post's content gate — only the creator and their active
+    followers can like (the feed reports the count to everyone, but the action
+    itself is gated like the rest of the content).
+    """
+
+    __tablename__ = "post_like"
+    __table_args__ = (
+        UniqueConstraint(
+            "post_id",
+            "user_id",
+            name="uq_post_like_post_user",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(
+        Integer,
+        ForeignKey("post.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    post = relationship("Post", back_populates="likes")
+
+
+class PostComment(Base):
+    """A subscriber's comment on a post (text + emojis only — no media).
+
+    ``body`` is validated at the API layer (1..500 chars, not blank). Comments
+    follow the same content gate as likes: creator + active followers can read
+    and write them; the author (or the post's creator) may delete one.
+    """
+
+    __tablename__ = "post_comment"
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(
+        Integer,
+        ForeignKey("post.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    body = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    post = relationship("Post", back_populates="comments")
 
 
 class PaidUnlock(Base):

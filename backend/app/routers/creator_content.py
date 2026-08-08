@@ -23,10 +23,31 @@ from sqlalchemy.orm import Session, selectinload
 from ..database import get_db
 from ..deps import require_creator
 from ..media import delete_original
-from ..models import PaidUnlock, Post, User
+from ..models import PaidUnlock, Post, PostComment, PostLike, User
 from ..schemas import CreatorPostOut, PostMediaOut, PostUpdate
 
 router = APIRouter(prefix="/creator/content", tags=["creator"])
+
+
+def _engagement_counts(db: Session, post_ids: list[int]) -> tuple[dict[int, int], dict[int, int]]:
+    """Bulk like/comment totals per post for the dashboard cards."""
+    if not post_ids:
+        return {}, {}
+    like_counts = dict(
+        db.execute(
+            select(PostLike.post_id, func.count(PostLike.id))
+            .where(PostLike.post_id.in_(post_ids))
+            .group_by(PostLike.post_id)
+        ).all()
+    )
+    comment_counts = dict(
+        db.execute(
+            select(PostComment.post_id, func.count(PostComment.id))
+            .where(PostComment.post_id.in_(post_ids))
+            .group_by(PostComment.post_id)
+        ).all()
+    )
+    return like_counts, comment_counts
 
 
 def _get_own_post(db: Session, creator_id: int, post_id: int) -> Post:
@@ -40,8 +61,15 @@ def _get_own_post(db: Session, creator_id: int, post_id: int) -> Post:
     return post
 
 
-def _creator_post_out(post: Post, unlock_counts: dict[int, int]) -> CreatorPostOut:
+def _creator_post_out(
+    post: Post,
+    unlock_counts: dict[int, int],
+    like_counts: dict[int, int] | None = None,
+    comment_counts: dict[int, int] | None = None,
+) -> CreatorPostOut:
     """Dashboard shape for one post — media urls always included (owner view)."""
+    like_counts = like_counts or {}
+    comment_counts = comment_counts or {}
     return CreatorPostOut(
         id=post.id,
         caption=post.caption,
@@ -52,6 +80,8 @@ def _creator_post_out(post: Post, unlock_counts: dict[int, int]) -> CreatorPostO
         media_count=len(post.media),
         view_count=post.view_count,
         unlock_count=unlock_counts.get(post.id, 0),
+        like_count=like_counts.get(post.id, 0),
+        comment_count=comment_counts.get(post.id, 0),
         media=[
             PostMediaOut(
                 id=media.id,
@@ -92,7 +122,11 @@ def list_creator_content(
         .order_by(Post.created_at.desc(), Post.id.desc())
     ).all()
     unlock_counts = _active_unlock_counts(db, [post.id for post in posts])
-    return [_creator_post_out(post, unlock_counts) for post in posts]
+    like_counts, comment_counts = _engagement_counts(db, [post.id for post in posts])
+    return [
+        _creator_post_out(post, unlock_counts, like_counts, comment_counts)
+        for post in posts
+    ]
 
 
 @router.patch("/{post_id}", response_model=CreatorPostOut)
@@ -113,7 +147,13 @@ def update_creator_post(
         post.is_visible = updates["is_visible"]
     db.commit()
     db.refresh(post)
-    return _creator_post_out(post, _active_unlock_counts(db, [post.id]))
+    like_counts, comment_counts = _engagement_counts(db, [post.id])
+    return _creator_post_out(
+        post,
+        _active_unlock_counts(db, [post.id]),
+        like_counts,
+        comment_counts,
+    )
 
 
 @router.delete("/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -134,6 +174,11 @@ def delete_creator_post(
     # than leaving a half-deleted post.
     try:
         db.execute(delete(PaidUnlock).where(PaidUnlock.post_id == post_id))
+        # Likes/comments cascade via the DB FK (Postgres) and the ORM
+        # relationships; the explicit deletes keep this correct on any backend
+        # (SQLite tests don't enforce FKs).
+        db.execute(delete(PostLike).where(PostLike.post_id == post_id))
+        db.execute(delete(PostComment).where(PostComment.post_id == post_id))
         db.delete(post)
         db.commit()
     except Exception:

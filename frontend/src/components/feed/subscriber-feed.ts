@@ -8,6 +8,7 @@ import '../media/icon.ts'
 import '../media/media-viewer.ts'
 import '../feedback/spinner.ts'
 import '../feedback/toast.ts'
+import './post-engagement.ts'
 import { api, ApiError, getAccessToken } from '../../lib/api'
 import type { FeedPost, FeedResponse } from '../../lib/api'
 
@@ -39,6 +40,8 @@ export class SubscriberFeed extends LitElement {
   @property({ type: Number, attribute: 'creator-id' }) creatorId = 0
   /** How many posts per page request. */
   @property({ type: Number, attribute: 'page-size' }) pageSize = 10
+  /** The signed-in viewer's user id (enables deleting their own comments). */
+  @property({ type: Number, attribute: 'user-id' }) userId = 0
 
   @state() private posts: FeedPost[] = []
   @state() private teaser = false
@@ -485,6 +488,17 @@ export class SubscriberFeed extends LitElement {
     window.setTimeout(() => (this.toastMessage = ''), 5000)
   }
 
+  /** Route toasts raised by the per-post engagement bar into the feed's own. */
+  private _onEngagementToast(e: CustomEvent) {
+    const detail = e.detail as { type?: 'info' | 'error'; heading?: string; message?: string }
+    if (!detail || typeof detail.message !== 'string') return
+    this._toast(
+      detail.type === 'error' ? 'error' : 'info',
+      detail.message,
+      detail.heading ?? '',
+    )
+  }
+
   private _mediaUrl(url: string): string {
     const token = getAccessToken()
     if (!token) return url
@@ -700,6 +714,12 @@ export class SubscriberFeed extends LitElement {
                 ? html`<p class="post-caption">${post.caption}</p>`
                 : nothing}
               ${this._renderMedia(post)}
+              <roque-post-engagement
+                .post="${post}"
+                .userId="${this.userId}"
+                ?interactable="${!this.teaser}"
+                @aero-toast="${this._onEngagementToast}"
+              ></roque-post-engagement>
             </roque-card>
           `,
         )}

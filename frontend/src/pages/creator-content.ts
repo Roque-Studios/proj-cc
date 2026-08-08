@@ -1221,6 +1221,8 @@ export class CreatorContentManager extends LitElement {
           ${p.broadcast_price_cents != null
             ? html`<span class="chip">🔓 ${p.unlock_count} unlocks</span>`
             : ''}
+          <span class="chip">❤ ${p.like_count} likes</span>
+          <span class="chip">💬 ${p.comment_count} comments</span>
           <span class="chip">🖼 ${p.media_count} media</span>
         </div>
 

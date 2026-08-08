@@ -352,6 +352,12 @@ class PostOut(BaseModel):
     # the viewer paid (or owns the post), False while the preview is locked.
     unlocked: bool | None = None
     media: list[PostMediaOut]
+    # Engagement counters shown on every post (teaser viewers included — the
+    # numbers are public, the actions are gated). ``liked_by_me`` is only ever
+    # True for the authenticated viewer who liked it.
+    like_count: int = 0
+    comment_count: int = 0
+    liked_by_me: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -364,6 +370,9 @@ def build_post_out(
     unlocked: bool | None,
     include_media_urls: bool,
     include_preview_urls: bool = False,
+    like_count: int = 0,
+    comment_count: int = 0,
+    liked_by_me: bool = False,
 ) -> PostOut:
     """Build the public post shape for a specific viewer.
 
@@ -374,6 +383,10 @@ def build_post_out(
     is set (the same teaser/locked cases), each withheld media carries a
     ``preview_url`` — the blurred public preview — so the frontend can render
     the post's shape without ever receiving real content bytes.
+
+    ``like_count`` / ``comment_count`` are the post's engagement totals the
+    caller computed (bulk-counted per feed page); ``liked_by_me`` is whether
+    the requesting viewer already liked this post.
     """
     return PostOut(
         id=post.id,
@@ -395,6 +408,9 @@ def build_post_out(
             )
             for media in post.media
         ],
+        like_count=like_count,
+        comment_count=comment_count,
+        liked_by_me=liked_by_me,
         created_at=post.created_at,
         updated_at=post.updated_at,
     )
@@ -453,8 +469,9 @@ class CreatorPostOut(BaseModel):
 
     Unlike the viewer-facing ``PostOut`` this always includes media urls (the
     owner can fetch their own media) plus the engagement stats: ``view_count``
-    (media views served to non-owners) and ``unlock_count`` (active one-time
-    unlocks — refunded unlocks are excluded).
+    (media views served to non-owners), ``unlock_count`` (active one-time
+    unlocks — refunded unlocks are excluded) and the like/comment totals
+    (``like_count`` / ``comment_count``).
     """
 
     id: int
@@ -466,7 +483,66 @@ class CreatorPostOut(BaseModel):
     media_count: int
     view_count: int
     unlock_count: int
+    like_count: int = 0
+    comment_count: int = 0
     media: list[PostMediaOut]
+
+
+class PostLikeResponse(BaseModel):
+    """Result of a like/unlike toggle on a post.
+
+    ``liked`` is the new state (True after like, False after unlike);
+    ``like_count`` is the post's total so the client can update its counter
+    without a refetch.
+    """
+
+    post_id: int
+    liked: bool
+    like_count: int
+
+
+class CommentCreate(BaseModel):
+    """Create a comment on a post (text + emojis only — no media)."""
+
+    body: str = Field(min_length=1, max_length=500)
+
+    @field_validator("body")
+    @classmethod
+    def _body_not_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Comment must not be empty")
+        return stripped
+
+
+class CommentOut(BaseModel):
+    """One comment on a post, with the author's display context.
+
+    ``author_username`` is the account handle; ``author_display_name`` is the
+    creator's display name (creators only — subscribers render their
+    username); ``author_avatar_url`` is the creator's public avatar url
+    (subscribers have none — the UI shows an initials circle).
+    """
+
+    id: int
+    post_id: int
+    user_id: int
+    body: str
+    author_username: str | None
+    author_display_name: str | None = None
+    author_avatar_url: str | None = None
+    author_is_creator: bool = False
+    created_at: datetime
+
+
+class CommentsPageOut(BaseModel):
+    """A paginated page of a post's comments (newest first)."""
+
+    items: list[CommentOut]
+    page: int
+    page_size: int
+    total: int
+    has_more: bool
 
 
 class PostUpdate(BaseModel):

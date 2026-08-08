@@ -13,6 +13,7 @@ from .routers import (
     creator,
     creator_content,
     creator_subscribers,
+    engagement,
     media_public,
     messages,
     posts,
@@ -41,6 +42,7 @@ app.include_router(viewer.router)
 app.include_router(webhooks.router)
 app.include_router(subscriptions.router)
 app.include_router(posts.router)
+app.include_router(engagement.router)
 app.include_router(public.router)
 app.include_router(stories.router)
 app.include_router(stories.dashboard_router)

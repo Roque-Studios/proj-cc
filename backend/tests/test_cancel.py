@@ -22,7 +22,7 @@ from app.models import (
 from app.payments.mock import MockPaymentProvider
 from app.services.subscriptions import SubscriptionService
 
-NOW = datetime(2026, 8, 1, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2099, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
 
 def _register(client, email: str, password: str = "Passw0rd1") -> dict:

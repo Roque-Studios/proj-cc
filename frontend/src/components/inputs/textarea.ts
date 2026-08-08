@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { LitElement, html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 
 @customElement("roque-textarea")
@@ -7,6 +7,8 @@ export class AeroTextarea extends LitElement {
   @property({ type: String }) placeholder = "";
   @property({ type: String }) label = "";
   @property({ type: Number }) rows = 4;
+  // Optional max character count (the native textarea attribute).
+  @property({ type: Number }) maxlength = 0;
   @property({ type: Boolean }) disabled = false;
   @property({ type: Boolean }) error = false;
 
@@ -142,6 +144,7 @@ export class AeroTextarea extends LitElement {
             .rows="${this.rows}"
             .value="${this.value}"
             placeholder="${this.placeholder}"
+            maxlength="${this.maxlength > 0 ? this.maxlength : nothing}"
             ?disabled="${this.disabled}"
             @input="${this._handleInput}"
           ></textarea>

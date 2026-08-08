@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.33.0] - 2026-08-08
+### Added
+- **Likes & comments on posts**: subscribers can now like a creator's post and leave text comments (with a small emoji quick-row in the composer). The feed shows a like button (optimistic heart toggle + live count) and a comments button that opens the post's comment section — lazy-loaded, newest first, paginated with a "show more" button; the viewer's own comments get a delete affordance, and the creator can moderate (delete) any comment on their posts. New tables `post_like` (unique per post+user, idempotent toggle) and `post_comment` (migration `b1c2d3e4f5a6`); new endpoints `POST/DELETE /posts/{id}/like` (return the fresh `like_count`) and `GET/POST /posts/{id}/comments` + `DELETE /posts/{id}/comments/{comment_id}` (404 for unknown/hidden posts, 403 for non-followers — engagement follows the same content gate as the media)
+- **Engagement counters everywhere**: every feed post now carries `like_count`, `comment_count` and `liked_by_me` (teaser viewers see the public counts; only the actions are gated), and the creator dashboard's content cards gained ❤ likes / 💬 comments chips (`CreatorPostOut.like_count` / `.comment_count`). The new `roque-post-engagement` component (built from existing `roque-*` pieces — `roque-icon` gained `heart` / `heart-filled`, `roque-textarea` gained a `maxlength` prop) renders under each feed post
+- Coverage: `backend/tests/test_engagement.py` (23 tests — auth/gating, idempotent likes, comment validation + pagination, delete permissions, feed + dashboard counts, post-delete cascade)
+
+### Fixed
+- **Cancel-sweep access test no longer expires on wall-clock time**: `test_access_persists_after_cancel_until_expired` hardcoded its fake clock to 2026-08-01 with a subscription period ending 2026-08-08 12:00 UTC — so once the real date passed that instant, the access resolver (correctly) reported the period as expired and the test failed. The fake clock now starts in 2099, keeping the test deterministic forever
+
 ## [0.32.2] - 2026-08-08
 ### Fixed
 - **Story viewer shows the creator's avatar (and name) again for subscribers**: the story viewer passed the header's avatar/name as kebab-case attributes (`creator-name`, `creator-avatar`), but Lit derives the observed attribute from a camelCase property by *lowercasing* it (`creatorName` → `creatorname`) — not by adding dashes. So the browser never fired `attributeChangedCallback` and the properties stayed empty, leaving the viewer header with a blank name and a fallback initial circle instead of the photo. `creatorName`/`creatorAvatar` now declare their attributes explicitly (`attribute: 'creator-name'` / `'creator-avatar'`, the same convention `roque-avatar`'s `story-active` and the feed's `creator-id` already use)
