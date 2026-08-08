@@ -553,6 +553,28 @@ In the Vite dev server the clean URLs fall back to the landing page (same as
 `/checkout` / `/feed` / `/chat`) — use `/login.html` and `/admin.html`
 directly in dev; nginx maps the clean `/login` / `/admin` URLs in production.
 
+### Theming (Aero / Olive / Silver)
+
+The UI is built as Windows-Aero chrome, and all colors are **tokens**, not
+literals. `public/theme.css` defines 37 CSS custom properties on `:root`
+(the default **Aero** look) plus `[data-theme="olive"]` and
+`[data-theme="silver"]` palette blocks (Windows 7 Olive Green / Silver).
+Glass tints are RGB triplets so `rgba(var(--cc-tint), 0.4)` stays themeable;
+the navy header gradient, headings, accent, page background, text grays and
+light fills swap per theme while semantic colors (success/danger/warning and
+dark media surfaces) stay fixed. Every component references `var(--cc-*)`
+through shadow-DOM inheritance.
+
+- **Pick a theme** from the hamburger menu's **Theme** row (any page) or the
+  top-right of `/admin`; the choice persists to `localStorage["cc_theme"]`
+  and applies instantly (no reload).
+- Each page `<head>` links `/theme.css` and runs a synchronous FOUC guard
+  that restores the persisted theme before first paint; inline body styles
+  keep a literal fallback so backgrounds never flash while it loads.
+- **Adding a theme**: add a `[data-theme="…"]` block to `public/theme.css`
+  overriding the tint/accent/heading/page-bg/header-grad tokens, then (optionally)
+  register it in `src/components/surfaces/theme-picker.ts` for the picker UI.
+
 ### Subscribe / checkout UI
 
 The subscribe checkout (`checkout.html`, nginx `/checkout/…`, `roque-*`

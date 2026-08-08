@@ -53,7 +53,7 @@ export class AeroMenuItem extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #435b75;
+      color: var(--cc-heading-soft);
     }
 
     .label-holder {

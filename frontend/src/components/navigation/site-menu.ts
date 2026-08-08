@@ -2,6 +2,7 @@ import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
 
 import '../media/icon.ts'
+import '../surfaces/theme-picker.ts'
 import type { UserMe } from '../../lib/api'
 
 /**
@@ -50,10 +51,10 @@ export class SiteMenu extends LitElement {
       padding: 8px 12px;
       background: linear-gradient(
         to bottom,
-        rgba(28, 45, 63, 0.96),
-        rgba(20, 33, 47, 0.96)
+        rgba(var(--cc-header-rgb), 0.96),
+        rgba(var(--cc-header-rgb-2), 0.96)
       );
-      color: #eaf1f8;
+      color: var(--cc-fill-strong);
       box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
     }
 
@@ -66,7 +67,7 @@ export class SiteMenu extends LitElement {
       border: 1px solid rgba(255, 255, 255, 0.25);
       border-radius: 4px;
       background: rgba(255, 255, 255, 0.06);
-      color: #eaf1f8;
+      color: var(--cc-fill-strong);
       cursor: pointer;
       transition: background 0.15s ease, transform 0.15s ease;
     }
@@ -111,7 +112,7 @@ export class SiteMenu extends LitElement {
       bottom: 0;
       z-index: 960;
       width: min(300px, 82vw);
-      background: #f4f8fb;
+      background: var(--cc-fill-strong);
       box-shadow: 3px 0 18px rgba(0, 0, 0, 0.4);
       transform: translateX(-100%);
       transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.3, 1);
@@ -128,8 +129,8 @@ export class SiteMenu extends LitElement {
       align-items: center;
       gap: 10px;
       padding: 14px 14px 12px;
-      background: linear-gradient(to bottom, #1c2d3f, #22384f);
-      color: #eaf1f8;
+      background: linear-gradient(to bottom, var(--cc-header-ink), var(--cc-header-ink-2));
+      color: var(--cc-fill-strong);
     }
 
     .drawer-head .avatar {
@@ -186,12 +187,12 @@ export class SiteMenu extends LitElement {
     }
 
     .nav-item:hover {
-      border-color: #b8d6f3;
-      background: linear-gradient(to bottom, #fafcfe 0%, #e3edf9 100%);
+      border-color: var(--cc-accent-light);
+      background: linear-gradient(to bottom, var(--cc-client) 0%, var(--cc-fill-strong) 100%);
     }
 
     .nav-item roque-icon {
-      color: #3a6a96;
+      color: var(--cc-accent-strong);
     }
 
     .nav-item.signout {
@@ -205,8 +206,14 @@ export class SiteMenu extends LitElement {
     .nav-note {
       margin: 10px 12px 4px;
       font-size: 11px;
-      color: #6b7a8a;
+      color: var(--cc-text-muted);
       line-height: 1.5;
+    }
+
+    .theme-foot {
+      margin-top: auto;
+      padding: 12px 14px 16px;
+      border-top: 1px solid rgba(255, 255, 255, 0.14);
     }
   `
 
@@ -311,6 +318,10 @@ export class SiteMenu extends LitElement {
                   full feed.
                 </p>
               `}
+        </div>
+
+        <div class="theme-foot">
+          <roque-theme-picker></roque-theme-picker>
         </div>
       </nav>
     `

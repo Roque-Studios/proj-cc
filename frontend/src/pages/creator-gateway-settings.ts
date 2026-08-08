@@ -78,13 +78,13 @@ export class CreatorGatewaySettings extends LitElement {
       margin: 0;
       font-size: 22px;
       font-weight: normal;
-      color: #1e395b;
+      color: var(--cc-heading);
     }
 
     .topbar p {
       margin: 4px 0 0;
       font-size: 12px;
-      color: #4a5b6e;
+      color: var(--cc-text-secondary);
       max-width: 560px;
       line-height: 1.5;
     }
@@ -99,7 +99,7 @@ export class CreatorGatewaySettings extends LitElement {
 
     .summary-label {
       font-size: 12px;
-      color: #4a5b6e;
+      color: var(--cc-text-secondary);
     }
 
     .grid {
@@ -112,7 +112,7 @@ export class CreatorGatewaySettings extends LitElement {
     .desc {
       margin: 0 0 14px;
       font-size: 12px;
-      color: #4a5b6e;
+      color: var(--cc-text-secondary);
       line-height: 1.5;
     }
 
@@ -150,7 +150,7 @@ export class CreatorGatewaySettings extends LitElement {
 
     .switch-zone .switch-hint {
       font-size: 10px;
-      color: #b04a1f;
+      color: var(--cc-warning-strong);
       margin-left: 6px;
     }
 
@@ -159,7 +159,7 @@ export class CreatorGatewaySettings extends LitElement {
     }
 
     .empty {
-      color: #6b7a8a;
+      color: var(--cc-text-muted);
       font-size: 13px;
       padding: 30px;
       text-align: center;
@@ -198,7 +198,7 @@ export class CreatorGatewaySettings extends LitElement {
       border: 1px solid #c8d4de;
       border-radius: 4px;
       overflow: hidden;
-      background: #eef3f7;
+      background: var(--cc-fill);
     }
 
     .banner-preview img {
@@ -840,7 +840,7 @@ export class CreatorGatewaySettings extends LitElement {
             </div>
           </div>
           <p class="desc" style="margin-top: 10px">
-            <span style="color: #8a97a5">
+            <span style="color: var(--cc-text-faint)">
               Note: Stripe and PayPal bill through their gateway plan — for
               those, configure a matching plan price in the gateway dashboard.
               Wompi payment links and the mock gateway charge this exact

@@ -104,13 +104,13 @@ export class CreatorSubscribersManager extends LitElement {
       margin: 0;
       font-size: 22px;
       font-weight: normal;
-      color: #1e395b;
+      color: var(--cc-heading);
     }
 
     .topbar p {
       margin: 4px 0 0;
       font-size: 12px;
-      color: #4a5b6e;
+      color: var(--cc-text-secondary);
       max-width: 560px;
       line-height: 1.5;
     }
@@ -126,9 +126,9 @@ export class CreatorSubscribersManager extends LitElement {
       background: linear-gradient(
         to bottom,
         rgba(255, 255, 255, 0.9) 0%,
-        rgba(235, 245, 250, 0.75) 100%
+        rgba(var(--cc-tint-warm), 0.75) 100%
       );
-      border: 1px solid rgba(90, 130, 165, 0.35);
+      border: 1px solid rgba(var(--cc-tint-deep), 0.35);
       border-radius: 4px;
       padding: 10px 12px;
       text-align: center;
@@ -137,13 +137,13 @@ export class CreatorSubscribersManager extends LitElement {
     .revenue-card .value {
       font-size: 18px;
       font-weight: 600;
-      color: #1e395b;
+      color: var(--cc-heading);
       white-space: nowrap;
     }
 
     .revenue-card .label {
       font-size: 10px;
-      color: #4a5b6e;
+      color: var(--cc-text-secondary);
       margin-top: 2px;
     }
 
@@ -166,9 +166,9 @@ export class CreatorSubscribersManager extends LitElement {
     }
 
     roque-button.filter-chip.active::part(aero-btn) {
-      background: linear-gradient(to bottom, #e8f4fb 0%, #cfe8f7 100%);
-      background-color: rgba(120, 190, 235, 0.35);
-      outline-color: rgba(40, 110, 165, 0.6);
+      background: linear-gradient(to bottom, var(--cc-fill-strong) 0%, var(--cc-fill-strong) 100%);
+      background-color: rgba(var(--cc-accent-rgb), 0.35);
+      outline-color: rgba(var(--cc-accent-rgb), 0.6);
       box-shadow:
         0 0 5px rgba(0, 162, 232, 0.45),
         inset 0 1px 0 rgba(255, 255, 255, 0.8);
@@ -201,7 +201,7 @@ export class CreatorSubscribersManager extends LitElement {
 
     .sub-meta {
       font-size: 11px;
-      color: #4a5b6e;
+      color: var(--cc-text-secondary);
       margin-top: 3px;
       display: flex;
       gap: 10px;
@@ -209,7 +209,7 @@ export class CreatorSubscribersManager extends LitElement {
     }
 
     .sub-meta .nonrenew {
-      color: #b04a1f;
+      color: var(--cc-warning-strong);
     }
 
     .sub-badges {
@@ -226,7 +226,7 @@ export class CreatorSubscribersManager extends LitElement {
     }
 
     .empty {
-      color: #6b7a8a;
+      color: var(--cc-text-muted);
       font-size: 13px;
       padding: 30px;
       text-align: center;
@@ -244,9 +244,9 @@ export class CreatorSubscribersManager extends LitElement {
     }
 
     roque-button.view-tab.active::part(aero-btn) {
-      background: linear-gradient(to bottom, #e8f4fb 0%, #cfe8f7 100%);
-      background-color: rgba(120, 190, 235, 0.35);
-      outline-color: rgba(40, 110, 165, 0.6);
+      background: linear-gradient(to bottom, var(--cc-fill-strong) 0%, var(--cc-fill-strong) 100%);
+      background-color: rgba(var(--cc-accent-rgb), 0.35);
+      outline-color: rgba(var(--cc-accent-rgb), 0.6);
       box-shadow:
         0 0 5px rgba(0, 162, 232, 0.45),
         inset 0 1px 0 rgba(255, 255, 255, 0.8);
@@ -272,7 +272,7 @@ export class CreatorSubscribersManager extends LitElement {
 
     .blocked-meta {
       font-size: 11px;
-      color: #6b7a8a;
+      color: var(--cc-text-muted);
       margin-top: 3px;
     }
 

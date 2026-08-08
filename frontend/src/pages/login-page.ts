@@ -62,13 +62,13 @@ export class LoginPage extends LitElement {
       margin: 0;
       font-size: 20px;
       font-weight: normal;
-      color: #1e395b;
+      color: var(--cc-heading);
     }
 
     .brand p {
       margin: 4px 0 0;
       font-size: 12px;
-      color: #4a5b6e;
+      color: var(--cc-text-secondary);
     }
 
     .form-row {
@@ -77,7 +77,7 @@ export class LoginPage extends LitElement {
 
     .hint {
       font-size: 11px;
-      color: #6b7a8a;
+      color: var(--cc-text-muted);
       margin: 14px 0 0;
       line-height: 1.5;
     }
@@ -93,7 +93,7 @@ export class LoginPage extends LitElement {
       margin-top: 14px;
       text-align: center;
       font-size: 12px;
-      color: #4a5b6e;
+      color: var(--cc-text-secondary);
     }
 
     .mode-switch button {
@@ -101,13 +101,13 @@ export class LoginPage extends LitElement {
       border: none;
       padding: 0;
       font: inherit;
-      color: #1e6fb4;
+      color: var(--cc-accent-strong);
       cursor: pointer;
       text-decoration: underline;
     }
 
     .mode-switch button:hover {
-      color: #165a92;
+      color: var(--cc-accent-deep);
     }
 
     .spinner-wrap {

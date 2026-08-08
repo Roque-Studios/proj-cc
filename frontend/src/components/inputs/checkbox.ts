@@ -20,7 +20,7 @@ export class AeroCheckbox extends LitElement {
       align-items: center;
       gap: 6px;
       cursor: pointer;
-      color: #1e1e1e;
+      color: var(--cc-text);
       text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
     }
 
@@ -58,17 +58,17 @@ export class AeroCheckbox extends LitElement {
 
     /* Aero Hover Glow State */
     .aero-checkbox-label:hover .native-checkbox:not(:disabled) ~ .aero-box {
-      border-color: #5b9ed6;
-      background: linear-gradient(to bottom, #f0f7fc 0%, #d8eaf7 100%);
+      border-color: var(--cc-accent-light);
+      background: linear-gradient(to bottom, var(--cc-fill-soft) 0%, var(--cc-fill-strong) 100%);
       box-shadow:
-        0 0 3px rgba(107, 180, 229, 0.6),
+        0 0 3px rgba(var(--cc-accent-rgb), 0.6),
         inset 1px 1px 1px rgba(0, 0, 0, 0.05);
     }
 
     /* Aero Focus Outline (Subtle dot indicator combined with slight glow) */
     .native-checkbox:focus-visible ~ .aero-box {
-      border-color: #3c7fb1;
-      box-shadow: 0 0 4px rgba(60, 127, 177, 0.8);
+      border-color: var(--cc-accent);
+      box-shadow: 0 0 4px rgba(var(--cc-accent-rgb), 0.8);
     }
 
     /* The Glassy Checkmark (Using pseudo-element) */
@@ -89,7 +89,7 @@ export class AeroCheckbox extends LitElement {
 
     /* Checked State Layout adjustments for background */
     .native-checkbox:checked ~ .aero-box {
-      background: linear-gradient(to bottom, #ffffff 0%, #e6f3ff 100%);
+      background: linear-gradient(to bottom, var(--cc-client) 0%, var(--cc-fill-strong) 100%);
     }
 
     .native-checkbox:checked ~ .aero-box::after {
@@ -99,7 +99,7 @@ export class AeroCheckbox extends LitElement {
     /* Disabled State */
     .native-checkbox:disabled ~ .aero-box {
       background: #f4f4f4;
-      border-color: #c0c0c0;
+      border-color: var(--cc-border-soft);
       box-shadow: none;
     }
 

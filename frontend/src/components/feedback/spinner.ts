@@ -16,7 +16,7 @@ export class AeroSpinner extends LitElement {
       justify-content: center;
       font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
       font-size: 12px;
-      color: #435b75;
+      color: var(--cc-heading-soft);
     }
 
     .spinner-wrapper {
@@ -35,7 +35,7 @@ export class AeroSpinner extends LitElement {
       border: 3px solid rgba(135, 206, 250, 0.25);
 
       /* The distinct Aero glowing neon-blue swept gradient crest */
-      border-top: 3px solid #00a2e8;
+      border-top: 3px solid var(--cc-cyan);
       border-right: 3px solid rgba(0, 162, 232, 0.6);
       border-bottom: 3px solid rgba(0, 162, 232, 0.2);
       border-left: 3px solid rgba(0, 162, 232, 0.05);
@@ -55,11 +55,11 @@ export class AeroSpinner extends LitElement {
       left: 50%;
       width: 4px;
       height: 4px;
-      background: #ffffff;
+      background: var(--cc-client);
       border-radius: 50%;
       box-shadow:
-        0 0 6px #ffffff,
-        0 0 2px #00a2e8;
+        0 0 6px var(--cc-client),
+        0 0 2px var(--cc-cyan);
       transform: translateX(-50%);
     }
 

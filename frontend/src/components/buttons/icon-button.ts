@@ -30,21 +30,21 @@ export class AeroIconButton extends LitElement {
       border-radius: 3px;
       cursor: pointer;
       outline: none;
-      color: #435b75; /* Classic dark slate blue toolbar accent color */
+      color: var(--cc-heading-soft); /* Classic dark slate blue toolbar accent color */
       transition: all 0.1s ease-in-out;
     }
 
     /* Aero Glass Toolbar Hover state */
     .aero-icon-btn:hover:not(:disabled) {
-      border-color: rgba(60, 127, 177, 0.45);
+      border-color: rgba(var(--cc-accent-rgb), 0.45);
       background: linear-gradient(
         to bottom,
         rgba(255, 255, 255, 0.6) 0%,
         rgba(255, 255, 255, 0.2) 50%,
-        rgba(180, 215, 245, 0.2) 50.1%,
-        rgba(180, 215, 245, 0.4) 100%
+        rgba(var(--cc-tint), 0.2) 50.1%,
+        rgba(var(--cc-tint), 0.4) 100%
       );
-      background-color: rgba(220, 237, 250, 0.4);
+      background-color: rgba(var(--cc-tint), 0.4);
       box-shadow:
         0 1px 1px rgba(0, 0, 0, 0.05),
         inset 0 1px 0 rgba(255, 255, 255, 0.4);
@@ -53,15 +53,15 @@ export class AeroIconButton extends LitElement {
 
     /* Aero Push Click State */
     .aero-icon-btn:active:not(:disabled) {
-      border-color: #3c7fb1;
-      background: linear-gradient(to bottom, #e2f0fb 0%, #cfe5f9 100%);
+      border-color: var(--cc-accent);
+      background: linear-gradient(to bottom, var(--cc-fill-strong) 0%, var(--cc-fill-strong) 100%);
       box-shadow: inset 1px 1px 2px rgba(0, 0, 0, 0.15);
     }
 
     /* Windows Focus Ring */
     .aero-icon-btn:focus-visible {
-      border-color: #3c7fb1;
-      box-shadow: 0 0 4px rgba(60, 127, 177, 0.8);
+      border-color: var(--cc-accent);
+      box-shadow: 0 0 4px rgba(var(--cc-accent-rgb), 0.8);
     }
 
     /* Disabled State */

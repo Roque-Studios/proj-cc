@@ -30,7 +30,7 @@ export class AeroTextField extends LitElement {
     }
 
     .aero-label {
-      color: #1e1e1e;
+      color: var(--cc-text);
       font-size: 12px;
       text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
     }
@@ -47,7 +47,7 @@ export class AeroTextField extends LitElement {
       font-family: inherit;
       font-size: inherit;
       color: #000000;
-      background-color: #ffffff;
+      background-color: var(--cc-client);
 
       /* Distinct Windows Aero Inset Border Structure */
       border: 1px solid #707070;
@@ -65,17 +65,17 @@ export class AeroTextField extends LitElement {
 
     /* Aero Hover Glow Effect */
     .aero-input:hover:not(:disabled) {
-      border-color: #5b9ed6;
+      border-color: var(--cc-accent-light);
       box-shadow:
-        0 0 3px rgba(107, 180, 229, 0.6),
+        0 0 3px rgba(var(--cc-accent-rgb), 0.6),
         inset 1px 1px 1px rgba(0, 0, 0, 0.1);
     }
 
     /* Aero Intense Focus Blue Glow */
     .aero-input:focus:not(:disabled) {
-      border-color: #3c7fb1;
+      border-color: var(--cc-accent);
       box-shadow:
-        0 0 5px rgba(60, 127, 177, 0.8),
+        0 0 5px rgba(var(--cc-accent-rgb), 0.8),
         inset 1px 1px 1px rgba(0, 0, 0, 0.05);
     }
 
@@ -89,7 +89,7 @@ export class AeroTextField extends LitElement {
     .aero-input:disabled {
       background-color: #f4f4f4;
       color: #838383;
-      border-color: #c0c0c0;
+      border-color: var(--cc-border-soft);
       box-shadow: none;
       cursor: not-allowed;
     }

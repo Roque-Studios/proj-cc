@@ -29,8 +29,8 @@ export class AeroDivider extends LitElement {
     .horizontal {
       width: 100%;
       height: 0;
-      border-top: 1px solid #b9cbd7; /* Subtle Shadow line */
-      border-bottom: 1px solid #ffffff; /* Glint highlight line */
+      border-top: 1px solid var(--cc-border-soft); /* Subtle Shadow line */
+      border-bottom: 1px solid var(--cc-client); /* Glint highlight line */
     }
 
     /* Fixed Vertical Line Layer */
@@ -40,8 +40,8 @@ export class AeroDivider extends LitElement {
       height: 100%;
       min-height: 16px;
       width: 0;
-      border-left: 1px solid #b9cbd7; /* Shadow line */
-      border-right: 1px solid #ffffff; /* Glint highlight line */
+      border-left: 1px solid var(--cc-border-soft); /* Shadow line */
+      border-right: 1px solid var(--cc-client); /* Glint highlight line */
       vertical-align: middle;
     }
   `;

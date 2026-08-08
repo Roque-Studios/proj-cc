@@ -47,14 +47,14 @@ export class RoquePagination extends LitElement {
       box-sizing: border-box;
       background: linear-gradient(
         to bottom,
-        #ffffff 0%,
+        var(--cc-client) 0%,
         #f2f2f2 50%,
         #e1e1e1 50.1%,
         #e5e5e5 100%
       );
       border: 1px solid #b1b1b1;
       border-radius: 2px;
-      color: #1e1e1e;
+      color: var(--cc-text);
       font-size: 11px;
       cursor: pointer;
       text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
@@ -65,27 +65,27 @@ export class RoquePagination extends LitElement {
     .pagination-btn:hover:not(.disabled) {
       background: linear-gradient(
         to bottom,
-        #f5fbff 0%,
-        #eaf5fd 50%,
-        #cbe6f9 50.1%,
-        #dbeffc 100%
+        var(--cc-fill-soft) 0%,
+        var(--cc-fill-soft) 50%,
+        var(--cc-fill-strong) 50.1%,
+        var(--cc-fill-strong) 100%
       );
-      border-color: #70a0c0;
+      border-color: var(--cc-accent-light);
       box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.4),
-        0 0 3px rgba(112, 160, 192, 0.5);
+        0 0 3px rgba(var(--cc-tint-deep), 0.5);
     }
 
     /* Active Highlight Window Selection Layout */
     .pagination-btn.active {
       background: linear-gradient(
         to bottom,
-        #e2f0fb 0%,
+        var(--cc-fill-strong) 0%,
         #cfe5f7 50%,
         #b9daf3 50.1%,
         #c6e3f7 100%
       );
-      border-color: #3c7fb1;
+      border-color: var(--cc-accent);
       font-weight: bold;
       box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.1);
     }

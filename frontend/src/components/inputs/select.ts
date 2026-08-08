@@ -32,7 +32,7 @@ export class AeroSelect extends LitElement {
     }
 
     .aero-label {
-      color: #1e1e1e;
+      color: var(--cc-text);
       font-size: 12px;
       text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
     }
@@ -49,7 +49,7 @@ export class AeroSelect extends LitElement {
       font-family: inherit;
       font-size: inherit;
       color: #000000;
-      background-color: #ffffff;
+      background-color: var(--cc-client);
       border: 1px solid #707070;
       border-top-color: #555555;
       border-radius: 2px;
@@ -88,21 +88,21 @@ export class AeroSelect extends LitElement {
     }
 
     .select-wrapper:hover .aero-select:not(:disabled) {
-      border-color: #5b9ed6;
+      border-color: var(--cc-accent-light);
       box-shadow:
-        0 0 3px rgba(107, 180, 229, 0.6),
+        0 0 3px rgba(var(--cc-accent-rgb), 0.6),
         inset 1px 1px 1px rgba(0, 0, 0, 0.05);
     }
 
     .select-wrapper:hover::after {
-      background-color: #d8eaf7;
-      border-left-color: #5b9ed6;
+      background-color: var(--cc-fill-strong);
+      border-left-color: var(--cc-accent-light);
     }
 
     .aero-select:focus:not(:disabled) {
-      border-color: #3c7fb1;
+      border-color: var(--cc-accent);
       box-shadow:
-        0 0 5px rgba(60, 127, 177, 0.8),
+        0 0 5px rgba(var(--cc-accent-rgb), 0.8),
         inset 1px 1px 1px rgba(0, 0, 0, 0.05);
     }
 
@@ -113,7 +113,7 @@ export class AeroSelect extends LitElement {
     .aero-select:disabled {
       background-color: #f4f4f4;
       color: #838383;
-      border-color: #c0c0c0;
+      border-color: var(--cc-border-soft);
       box-shadow: none;
       cursor: not-allowed;
     }

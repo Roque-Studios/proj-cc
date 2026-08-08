@@ -1,0 +1,128 @@
+/* ========================================================================== */
+/*  theme.css — Windows 7-era chrome tokens                                    */
+/*                                                                            */
+/*  The whole UI is Aero-styled (Segoe UI, glass tints, navy gradients).      */
+/*  Theming means swapping the tint + accent + chrome palette while the       */
+/*  structure stays put. Custom properties cascade through every shadow       */
+/*  root, so Lit components just reference var(--cc-*) tokens.                */
+/*                                                                            */
+/*  Glass tints are stored as RGB triplets so they can be used inside rgba(): */
+/*    rgba(var(--cc-tint), 0.4)                                               */
+/*                                                                            */
+/*  Semantic colors (success/danger/warning/dark media surfaces) are fixed    */
+/*  across themes — Windows themes don't repaint those.                       */
+/* ========================================================================== */
+
+:root,
+:root[data-theme="aero"] {
+  /* ---- Glass tints (RGB triplets) ---- */
+  --cc-tint: 173, 216, 230;        /* Aero glass blue (buttons, cards, hero) */
+  --cc-glass: 195, 225, 245;       /* window-frame glass (dialogs, cards)    */
+  --cc-tint-deep: 90, 130, 165;    /* deeper glass (pressed, gallery glow)   */
+  --cc-tint-hi: 200, 235, 255;     /* hover glass                            */
+  --cc-tint-warm: 222, 234, 243;   /* soft panel tint (chat, tables)         */
+
+  /* ---- Core chrome ---- */
+  --cc-page-bg: #d1e4ef;
+  --cc-heading: #1e395b;           /* heading / brand ink                    */
+  --cc-heading-soft: #435b75;      /* muted navy ink (icons, secondary)      */
+  --cc-accent: #3c7fb1;            /* focus / selected / primary             */
+  --cc-accent-rgb: 60, 127, 177;
+  --cc-accent-strong: #1e6fb4;     /* hover accent                           */
+  --cc-accent-deep: #165a92;       /* pressed / link hover                   */
+  --cc-accent-light: #5b9ed6;      /* light accent (borders, chips)          */
+  --cc-header-grad: linear-gradient(135deg, #2c3e50 0%, #1e395b 55%, #14212f 100%);
+  --cc-header-rgb: 28, 45, 63;     /* translucent drawer/sidebar chrome      */
+  --cc-header-rgb-2: 20, 33, 47;
+  --cc-header-ink: #1c2d3f;        /* dark chrome text/borders               */
+  --cc-header-ink-2: #22384f;
+  --cc-client: #ffffff;            /* card/dialog/field client area          */
+  --cc-border: #919191;            /* outer window borders                   */
+  --cc-border-soft: #c0c0c0;       /* control borders                        */
+
+  /* ---- Text inks (dark for every theme) ---- */
+  --cc-text: #1e1e1e;
+  --cc-text-secondary: #4a5b6e;
+  --cc-text-muted: #6b7a8a;
+  --cc-text-faint: #8a97a5;
+
+  /* ---- Tinted panel fills (light surfaces) ---- */
+  --cc-fill: #eef3f7;              /* neutral-tinted panel fill              */
+  --cc-fill-soft: #f5fbff;         /* very light fill (table headers, rows)  */
+  --cc-fill-strong: #d8eaf7;       /* stronger tint (active, focus glow)     */
+
+  /* ---- Semantic — deliberately fixed across themes ---- */
+  --cc-success: #2eb82e;
+  --cc-success-soft: #35c759;
+  --cc-danger: #b03a3a;
+  --cc-danger-strong: #721c24;
+  --cc-warning: #e6a100;
+  --cc-warning-strong: #b04a1f;
+  --cc-info: #0066cc;
+  --cc-cyan: #00a2e8;              /* spinner / live accents                 */
+  --cc-dark: #0e1621;              /* media / overlay dark surfaces          */
+}
+
+/* ------------------------------------------------------------------------ */
+/*  Olive — Windows 7 "Olive Green"                                          */
+/* ------------------------------------------------------------------------ */
+:root[data-theme="olive"] {
+  --cc-tint: 214, 214, 190;
+  --cc-glass: 224, 226, 205;
+  --cc-tint-deep: 122, 130, 95;
+  --cc-tint-hi: 233, 233, 210;
+  --cc-tint-warm: 226, 228, 205;
+
+  --cc-page-bg: #d9dcc8;
+  --cc-heading: #3c5230;
+  --cc-heading-soft: #55613f;
+  --cc-accent: #6d7a3c;
+  --cc-accent-rgb: 109, 122, 60;
+  --cc-accent-strong: #57662e;
+  --cc-accent-deep: #45512a;
+  --cc-accent-light: #8a9a4f;
+  --cc-header-grad: linear-gradient(135deg, #3a4230 0%, #3c5230 55%, #1f2a18 100%);
+  --cc-header-rgb: 58, 66, 48;
+  --cc-header-rgb-2: 31, 42, 24;
+  --cc-header-ink: #262d1e;
+  --cc-header-ink-2: #2c3522;
+  --cc-client: #ffffff;
+  --cc-border: #8a8f74;
+  --cc-border-soft: #b8bd9c;
+
+  --cc-fill: #eef0e6;
+  --cc-fill-soft: #f6f7ef;
+  --cc-fill-strong: #e0e4c8;
+}
+
+/* ------------------------------------------------------------------------ */
+/*  Silver — Windows 7 "Silver"                                              */
+/* ------------------------------------------------------------------------ */
+:root[data-theme="silver"] {
+  --cc-tint: 215, 224, 229;
+  --cc-glass: 225, 231, 235;
+  --cc-tint-deep: 105, 120, 130;
+  --cc-tint-hi: 232, 238, 242;
+  --cc-tint-warm: 231, 237, 241;
+
+  --cc-page-bg: #d4d9dd;
+  --cc-heading: #3a4650;
+  --cc-heading-soft: #4c5a64;
+  --cc-accent: #6f7c86;
+  --cc-accent-rgb: 111, 124, 134;
+  --cc-accent-strong: #55626c;
+  --cc-accent-deep: #404b54;
+  --cc-accent-light: #8b99a3;
+  --cc-header-grad: linear-gradient(135deg, #39444d 0%, #3a4650 55%, #1e252b 100%);
+  --cc-header-rgb: 57, 68, 77;
+  --cc-header-rgb-2: 30, 37, 43;
+  --cc-header-ink: #262c31;
+  --cc-header-ink-2: #2c3339;
+  --cc-client: #ffffff;
+  --cc-border: #7e8a93;
+  --cc-border-soft: #b4bdc4;
+
+  --cc-fill: #eef1f3;
+  --cc-fill-soft: #f6f8f9;
+  --cc-fill-strong: #d9e0e4;
+}

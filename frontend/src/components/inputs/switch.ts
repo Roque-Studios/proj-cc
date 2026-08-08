@@ -20,7 +20,7 @@ export class AeroSwitch extends LitElement {
       align-items: center;
       gap: 10px;
       cursor: pointer;
-      color: #1e1e1e;
+      color: var(--cc-text);
       text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
     }
 
@@ -91,7 +91,7 @@ export class AeroSwitch extends LitElement {
       border: 1px solid rgba(0, 0, 0, 0.35);
       box-shadow:
         0 1px 2px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 #ffffff;
+        inset 0 1px 0 var(--cc-client);
 
       transition:
         transform 0.2s cubic-bezier(0.25, 0.8, 0.25, 1),
@@ -103,18 +103,18 @@ export class AeroSwitch extends LitElement {
     .aero-switch-label:hover
       .native-checkbox:not(:disabled)
       ~ .aero-switch-track {
-      border-color: #5b9ed6;
+      border-color: var(--cc-accent-light);
     }
 
     .aero-switch-label:hover
       .native-checkbox:not(:disabled)
       ~ .aero-switch-track
       .aero-switch-knob {
-      background-color: #e2f3ff;
-      border-color: #3c7fb1;
+      background-color: var(--cc-fill-strong);
+      border-color: var(--cc-accent);
       box-shadow:
         0 0 4px rgba(0, 162, 232, 0.4),
-        inset 0 1px 0 #ffffff;
+        inset 0 1px 0 var(--cc-client);
     }
 
     /* Active Checked State adjustments */
@@ -124,21 +124,21 @@ export class AeroSwitch extends LitElement {
 
     .native-checkbox:checked ~ .aero-switch-track .aero-switch-knob {
       transform: translateX(20px);
-      background-color: #ffffff;
+      background-color: var(--cc-client);
     }
 
     /* Focus Rings */
     .native-checkbox:focus-visible ~ .aero-switch-track {
       box-shadow:
-        0 0 5px rgba(60, 127, 177, 0.8),
+        0 0 5px rgba(var(--cc-accent-rgb), 0.8),
         inset 1px 1px 2px rgba(0, 0, 0, 0.1);
-      border-color: #3c7fb1;
+      border-color: var(--cc-accent);
     }
 
     /* Disabled States */
     .native-checkbox:disabled ~ .aero-switch-track {
       background: #e4e4e4;
-      border-color: #c0c0c0;
+      border-color: var(--cc-border-soft);
       box-shadow: none;
     }
 

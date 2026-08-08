@@ -54,14 +54,14 @@ export class LegalPage extends LitElement {
     .header-name {
       margin: 0;
       font-size: 18px;
-      color: #1e395b;
+      color: var(--cc-heading);
       font-weight: 600;
     }
 
     .header-handle {
       margin: 2px 0 0;
       font-size: 12px;
-      color: #5a6a7a;
+      color: var(--cc-text-secondary);
     }
 
     .legal-doc {
@@ -81,7 +81,7 @@ export class LegalPage extends LitElement {
     .error-box {
       padding: 18px;
       text-align: center;
-      color: #721c24;
+      color: var(--cc-danger-strong);
       font-size: 13px;
     }
 
@@ -97,7 +97,7 @@ export class LegalPage extends LitElement {
     }
 
     .back-link:hover {
-      color: #3c7fb1;
+      color: var(--cc-accent);
       text-decoration: underline;
     }
   `

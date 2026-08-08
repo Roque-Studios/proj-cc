@@ -33,7 +33,7 @@ export class AeroBadge extends LitElement {
 
     /* Variant: Default / Neutral Silver */
     :host([context="default"]) .aero-badge {
-      background: linear-gradient(to bottom, #ffffff 0%, #eaeaea 100%);
+      background: linear-gradient(to bottom, var(--cc-client) 0%, #eaeaea 100%);
       border-color: #b9b9b9;
       color: #333333;
     }
@@ -56,12 +56,12 @@ export class AeroBadge extends LitElement {
     :host([context="error"]) .aero-badge {
       background: linear-gradient(to bottom, #fdf2f2 0%, #f8d7da 100%);
       border-color: #e8a2a7;
-      color: #721c24;
+      color: var(--cc-danger-strong);
     }
 
     /* Variant: Info / Soft Sky Blue */
     :host([context="info"]) .aero-badge {
-      background: linear-gradient(to bottom, #f0f7fd 0%, #d1ecf1 100%);
+      background: linear-gradient(to bottom, var(--cc-fill-soft) 0%, #d1ecf1 100%);
       border-color: #bee5eb;
       color: #0c5460;
     }

@@ -107,7 +107,7 @@ export class DmChat extends LitElement {
     .brand {
       font-size: 16px;
       font-weight: 600;
-      color: #1e395b;
+      color: var(--cc-heading);
       flex: 1;
       text-align: center;
       min-width: 0;
@@ -130,20 +130,20 @@ export class DmChat extends LitElement {
       background: linear-gradient(
         to bottom,
         rgba(255, 255, 255, 0.8),
-        rgba(173, 216, 230, 0.18)
+        rgba(var(--cc-tint), 0.18)
       );
       cursor: pointer;
       transition: box-shadow 0.2s ease, border-color 0.2s ease;
     }
 
     .inbox-item:hover {
-      border-color: #5b9ed6;
+      border-color: var(--cc-accent-light);
       box-shadow: 0 0 5px rgba(0, 162, 232, 0.4);
     }
 
     .inbox-item.active {
-      border-color: #3c7fb1;
-      box-shadow: 0 0 0 1px #3c7fb1;
+      border-color: var(--cc-accent);
+      box-shadow: 0 0 0 1px var(--cc-accent);
     }
 
     .inbox-info {
@@ -154,12 +154,12 @@ export class DmChat extends LitElement {
     .inbox-name {
       font-size: 13px;
       font-weight: 600;
-      color: #1e1e1e;
+      color: var(--cc-text);
     }
 
     .inbox-preview {
       font-size: 12px;
-      color: #6b7a8a;
+      color: var(--cc-text-muted);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -167,14 +167,14 @@ export class DmChat extends LitElement {
 
     .inbox-time {
       font-size: 10px;
-      color: #8a97a5;
+      color: var(--cc-text-faint);
       white-space: nowrap;
     }
 
     .empty {
       padding: 26px;
       text-align: center;
-      color: #6b7a8a;
+      color: var(--cc-text-muted);
       font-size: 13px;
     }
 
@@ -189,7 +189,7 @@ export class DmChat extends LitElement {
       max-width: 260px;
       padding: 22px 16px;
       text-align: center;
-      color: #6b7a8a;
+      color: var(--cc-text-muted);
       font-size: 13px;
       line-height: 1.55;
     }
@@ -213,7 +213,7 @@ export class DmChat extends LitElement {
     .thread-name {
       font-size: 14px;
       font-weight: 600;
-      color: #1e395b;
+      color: var(--cc-heading);
       flex: 1;
       min-width: 0;
       white-space: nowrap;
@@ -235,7 +235,7 @@ export class DmChat extends LitElement {
       text-align: center;
       padding: 4px;
       font-size: 11px;
-      color: #7a8794;
+      color: var(--cc-text-faint);
     }
 
     .bubble {
@@ -256,15 +256,15 @@ export class DmChat extends LitElement {
 
     .bubble.mine {
       align-self: flex-end;
-      background: linear-gradient(to bottom, #e2f0fb, #c9e3f5);
-      border: 1px solid #9ec4e0;
+      background: linear-gradient(to bottom, var(--cc-fill-strong), rgba(var(--cc-tint), 0.55));
+      border: 1px solid rgba(var(--cc-tint-deep), 0.55);
       border-bottom-right-radius: 3px;
-      color: #10324f;
+      color: var(--cc-header-ink);
     }
 
     .bubble.theirs {
       align-self: flex-start;
-      background: #ffffff;
+      background: var(--cc-client);
       border: 1px solid #d5dce3;
       border-bottom-left-radius: 3px;
       color: #222;
@@ -274,7 +274,7 @@ export class DmChat extends LitElement {
       display: block;
       margin-top: 2px;
       font-size: 9.5px;
-      color: #7a8794;
+      color: var(--cc-text-faint);
       text-align: right;
       white-space: nowrap;
     }
@@ -307,7 +307,7 @@ export class DmChat extends LitElement {
       align-items: center;
       gap: 5px;
       font-size: 12px;
-      color: #3c7fb1;
+      color: var(--cc-accent);
       background: none;
       border: 1px dashed #9fc3dd;
       border-radius: 999px;
@@ -316,7 +316,7 @@ export class DmChat extends LitElement {
     }
 
     .attach-btn:hover {
-      background: rgba(60, 127, 177, 0.08);
+      background: rgba(var(--cc-accent-rgb), 0.08);
     }
 
     .paid-box {
@@ -324,13 +324,13 @@ export class DmChat extends LitElement {
       align-items: center;
       gap: 5px;
       font-size: 12px;
-      color: #5a6a7a;
+      color: var(--cc-text-secondary);
       cursor: pointer;
       user-select: none;
     }
 
     .paid-box input {
-      accent-color: #3c7fb1;
+      accent-color: var(--cc-accent);
     }
 
     .paid-input {
@@ -368,7 +368,7 @@ export class DmChat extends LitElement {
       top: 1px;
       right: 1px;
       background: rgba(0, 0, 0, 0.65);
-      color: #fff;
+      color: var(--cc-client);
       border: none;
       border-radius: 50%;
       width: 16px;
@@ -419,7 +419,7 @@ export class DmChat extends LitElement {
       align-items: flex-start;
       gap: 10px;
       font-size: 12px;
-      color: #5a6a7a;
+      color: var(--cc-text-secondary);
       background: rgba(254, 240, 185, 0.35);
     }
 
@@ -431,7 +431,7 @@ export class DmChat extends LitElement {
     .back-link {
       display: none;
       font-size: 12px;
-      color: #3c7fb1;
+      color: var(--cc-accent);
       cursor: pointer;
       text-decoration: underline;
     }
@@ -454,7 +454,7 @@ export class DmChat extends LitElement {
     }
 
     .header-back:hover {
-      background: rgba(60, 127, 177, 0.1);
+      background: rgba(var(--cc-accent-rgb), 0.1);
     }
 
     .header-back:active {
@@ -520,7 +520,7 @@ export class DmChat extends LitElement {
     .error-box {
       padding: 16px;
       text-align: center;
-      color: #721c24;
+      color: var(--cc-danger-strong);
       font-size: 13px;
     }
 

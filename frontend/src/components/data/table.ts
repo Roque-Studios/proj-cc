@@ -29,7 +29,7 @@ export class AeroTable extends LitElement {
     .table-container {
       width: 100%;
       overflow-x: auto;
-      background-color: #ffffff;
+      background-color: var(--cc-client);
       border: 1px solid #b1b1b1;
       box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
     }
@@ -69,11 +69,11 @@ export class AeroTable extends LitElement {
     th:hover {
       background: linear-gradient(
         to bottom,
-        #f5fbff 0%,
-        #eaf5fd 40%,
-        #d8eefc 50%,
-        #cbe6f9 50.1%,
-        #dbeffc 100%
+        var(--cc-fill-soft) 0%,
+        var(--cc-fill-soft) 40%,
+        var(--cc-fill-strong) 50%,
+        var(--cc-fill-strong) 50.1%,
+        var(--cc-fill-strong) 100%
       );
       border-right-color: #b0d7f2;
     }
@@ -93,7 +93,7 @@ export class AeroTable extends LitElement {
 
     /* Aero Windows Selection Hover Highlight style */
     tr:hover td {
-      background-color: #edf5fc;
+      background-color: var(--cc-fill-soft);
       color: #000000;
     }
 

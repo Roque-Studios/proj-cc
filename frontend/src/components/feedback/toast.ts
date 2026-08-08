@@ -74,14 +74,14 @@ export class AeroToast extends LitElement {
     }
 
     .aero-close-btn:hover {
-      background-color: #e81123;
-      color: #ffffff;
+      background-color: var(--cc-danger);
+      color: var(--cc-client);
     }
 
     .toast-icon-zone {
       display: flex;
       align-items: flex-start;
-      color: #0066cc;
+      color: var(--cc-info);
       padding-top: 2px;
     }
 
@@ -95,7 +95,7 @@ export class AeroToast extends LitElement {
     .toast-heading {
       font-size: 12px;
       font-weight: bold;
-      color: #1e395b;
+      color: var(--cc-heading);
       margin: 0;
     }
 

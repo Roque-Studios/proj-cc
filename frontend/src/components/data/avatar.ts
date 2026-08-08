@@ -30,7 +30,7 @@ export class AeroAvatar extends LitElement {
       position: relative;
       padding: 3px;
       border-radius: 8px;
-      background: linear-gradient(135deg, #2eb82e 0%, #35c759 50%, #2eb82e 100%);
+      background: linear-gradient(135deg, var(--cc-success) 0%, var(--cc-success-soft) 50%, var(--cc-success) 100%);
       box-shadow: 0 0 0 1px rgba(30, 110, 30, 0.45), 0 2px 6px rgba(0, 0, 0, 0.25);
       /* The ring is the frame itself: white gap between ring and avatar. */
       width: fit-content;
@@ -52,14 +52,14 @@ export class AeroAvatar extends LitElement {
 
     /* Keyboard focus on the clickable ring (Enter/Space handled). */
     .story-ring.clickable:focus-visible {
-      outline: 2px solid #2eb82e;
+      outline: 2px solid var(--cc-success);
       outline-offset: 2px;
     }
 
     /* The Iconic Windows 7 Start Menu Picture Border Frame */
     .aero-avatar-frame {
       position: relative;
-      background: #ffffff;
+      background: var(--cc-client);
       padding: 4px; /* White inner border padding */
       border: 1px solid rgba(0, 0, 0, 0.35);
       border-radius: 4px;
@@ -111,7 +111,7 @@ export class AeroAvatar extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #ffffff;
+      color: var(--cc-client);
       font-family: "Segoe UI", sans-serif;
       font-weight: bold;
       text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);

@@ -82,13 +82,13 @@ export class SubscribeCheckout extends LitElement {
 
     .price-label {
       font-size: 12px;
-      color: #5a6a7a;
+      color: var(--cc-text-secondary);
     }
 
     .price-value {
       font-size: 18px;
       font-weight: 700;
-      color: #1e395b;
+      color: var(--cc-heading);
     }
 
     .gateway-list {
@@ -107,28 +107,28 @@ export class SubscribeCheckout extends LitElement {
       background: linear-gradient(
         to bottom,
         rgba(255, 255, 255, 0.8),
-        rgba(173, 216, 230, 0.18)
+        rgba(var(--cc-tint), 0.18)
       );
       cursor: pointer;
       transition: box-shadow 0.2s ease, border-color 0.2s ease;
     }
 
     .gateway-option:hover {
-      border-color: #5b9ed6;
+      border-color: var(--cc-accent-light);
       box-shadow: 0 0 5px rgba(0, 162, 232, 0.4);
     }
 
     .gateway-option.selected {
-      border-color: #3c7fb1;
+      border-color: var(--cc-accent);
       box-shadow:
-        0 0 0 1px #3c7fb1,
-        0 0 6px rgba(60, 127, 177, 0.35);
+        0 0 0 1px var(--cc-accent),
+        0 0 6px rgba(var(--cc-accent-rgb), 0.35);
     }
 
     .gateway-label {
       flex: 1;
       font-size: 13px;
-      color: #1e1e1e;
+      color: var(--cc-text);
       font-weight: 600;
     }
 
@@ -159,7 +159,7 @@ export class SubscribeCheckout extends LitElement {
       background: linear-gradient(
         to bottom,
         rgba(255, 255, 255, 0.85),
-        rgba(173, 216, 230, 0.14)
+        rgba(var(--cc-tint), 0.14)
       );
     }
 
@@ -167,7 +167,7 @@ export class SubscribeCheckout extends LitElement {
       margin: 0 0 8px;
       font-size: 12px;
       font-weight: 600;
-      color: #1e395b;
+      color: var(--cc-heading);
     }
 
     .consent-row {
@@ -195,19 +195,19 @@ export class SubscribeCheckout extends LitElement {
     }
 
     .consent-label a:hover {
-      color: #3c7fb1;
+      color: var(--cc-accent);
     }
 
     .consent-hint {
       margin: 8px 0 0;
       font-size: 11px;
-      color: #8a97a5;
+      color: var(--cc-text-faint);
     }
 
     .consent-warn {
       margin: 10px 0 0;
       font-size: 12px;
-      color: #b04a1f;
+      color: var(--cc-warning-strong);
     }
 
     .status-panel {
@@ -224,27 +224,27 @@ export class SubscribeCheckout extends LitElement {
       margin: 0 0 6px;
       font-size: 15px;
       font-weight: 600;
-      color: #1e395b;
+      color: var(--cc-heading);
     }
 
     .status-sub {
       margin: 0 auto 14px;
       font-size: 12px;
-      color: #5a6a7a;
+      color: var(--cc-text-secondary);
       max-width: 420px;
       line-height: 1.5;
     }
 
     .resume-note {
       font-size: 11px;
-      color: #8a97a5;
+      color: var(--cc-text-faint);
       margin-top: 8px;
     }
 
     .error-box {
       padding: 16px;
       text-align: center;
-      color: #721c24;
+      color: var(--cc-danger-strong);
       font-size: 13px;
     }
 
@@ -259,7 +259,7 @@ export class SubscribeCheckout extends LitElement {
       align-items: center;
       gap: 8px;
       font-size: 12px;
-      color: #5a6a7a;
+      color: var(--cc-text-secondary);
       margin-top: 10px;
     }
   `
@@ -581,10 +581,10 @@ export class SubscribeCheckout extends LitElement {
         <div class="panel">
           <div class="price-row">
             <span class="price-label">Monthly subscription</span>
-            <span class="price-value">${this._price()}<span style="font-size:11px;color:#7a8794"> /mo</span></span>
+            <span class="price-value">${this._price()}<span style="font-size:11px;color:var(--cc-text-faint)"> /mo</span></span>
           </div>
 
-          <p style="font-size:12px;color:#5a6a7a;margin:0 0 10px">Choose a payment method:</p>
+          <p style="font-size:12px;color:var(--cc-text-secondary);margin:0 0 10px">Choose a payment method:</p>
           <div class="gateway-list">
             ${this.gateways.map(
               (g) => html`

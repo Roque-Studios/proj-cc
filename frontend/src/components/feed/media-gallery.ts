@@ -80,13 +80,13 @@ export class MediaGallery extends LitElement {
       border-radius: 4px;
       overflow: hidden;
       border: 1px solid #cdd7e0;
-      background: #0e1621;
+      background: var(--cc-dark);
       cursor: zoom-in;
       transition: box-shadow 0.15s ease, transform 0.15s ease;
     }
 
     .tile:hover {
-      box-shadow: 0 0 8px rgba(60, 127, 177, 0.55);
+      box-shadow: 0 0 8px rgba(var(--cc-accent-rgb), 0.55);
       transform: translateY(-1px);
     }
 
@@ -140,7 +140,7 @@ export class MediaGallery extends LitElement {
       margin-bottom: 12px;
       padding: 10px;
       font-size: 12px;
-      color: #5a6a7a;
+      color: var(--cc-text-secondary);
       background: rgba(255, 255, 255, 0.55);
       border: 1px dashed #b8c4d0;
       border-radius: 4px;
@@ -152,19 +152,19 @@ export class MediaGallery extends LitElement {
       justify-content: center;
       padding: 14px 0 4px;
       font-size: 12px;
-      color: #7a8794;
+      color: var(--cc-text-faint);
     }
 
     .load-more {
       font-family: inherit;
       font-size: 12px;
-      color: #3c7fb1;
+      color: var(--cc-accent);
       background: linear-gradient(
         to bottom,
         rgba(255, 255, 255, 0.9),
-        rgba(222, 234, 243, 0.75)
+        rgba(var(--cc-tint-warm), 0.75)
       );
-      border: 1px solid rgba(90, 130, 165, 0.4);
+      border: 1px solid rgba(var(--cc-tint-deep), 0.4);
       border-radius: 3px;
       padding: 6px 16px;
       cursor: pointer;
@@ -172,7 +172,7 @@ export class MediaGallery extends LitElement {
     }
 
     .load-more:hover:not(:disabled) {
-      box-shadow: 0 0 5px rgba(60, 127, 177, 0.55);
+      box-shadow: 0 0 5px rgba(var(--cc-accent-rgb), 0.55);
       transform: translateY(-1px);
     }
 
@@ -184,7 +184,7 @@ export class MediaGallery extends LitElement {
     .error-box {
       padding: 16px;
       text-align: center;
-      color: #721c24;
+      color: var(--cc-danger-strong);
       font-size: 13px;
     }
 
@@ -192,7 +192,7 @@ export class MediaGallery extends LitElement {
       padding: 22px 10px;
       text-align: center;
       font-size: 12px;
-      color: #7a8794;
+      color: var(--cc-text-faint);
     }
   `
 

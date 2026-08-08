@@ -42,7 +42,7 @@ export class AeroAlert extends LitElement {
     .aero-dialog-window {
       width: 100%;
       max-width: 460px;
-      background: #ffffff;
+      background: var(--cc-client);
       border: 1px solid #142a42;
       border-radius: 5px;
       box-shadow:
@@ -58,7 +58,7 @@ export class AeroAlert extends LitElement {
       display: flex;
       gap: 16px;
       padding: 16px 20px;
-      background-color: #ffffff;
+      background-color: var(--cc-client);
     }
 
     /* The Left Status Icon Box */
@@ -70,13 +70,13 @@ export class AeroAlert extends LitElement {
 
     /* Color styles matching original Win7 system warning color vectors */
     .type-info {
-      color: #0066cc;
+      color: var(--cc-info);
     }
     .type-warning {
-      color: #e6a100;
+      color: var(--cc-warning);
     }
     .type-error {
-      color: #cc3333;
+      color: var(--cc-danger);
     }
     .type-success {
       color: #2a8a2a;
@@ -100,7 +100,7 @@ export class AeroAlert extends LitElement {
 
     .aero-dialog-message {
       font-size: 12px;
-      color: #1e1e1e;
+      color: var(--cc-text);
       margin: 0;
       line-height: 1.5;
     }

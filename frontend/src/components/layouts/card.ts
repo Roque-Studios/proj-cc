@@ -21,10 +21,10 @@ export class AeroCard extends LitElement {
         to bottom,
         rgba(255, 255, 255, 0.45) 0%,
         rgba(255, 255, 255, 0.2) 15%,
-        rgba(173, 216, 230, 0.25) 15.1%,
-        /* Subtle Windows Blue tint accent */ rgba(173, 216, 230, 0.15) 100%
+        rgba(var(--cc-tint), 0.25) 15.1%,
+        /* Subtle Windows Blue tint accent */ rgba(var(--cc-tint), 0.15) 100%
       );
-      background-color: rgba(195, 225, 245, 0.35);
+      background-color: rgba(var(--cc-glass), 0.35);
 
       /* Dual border overlay: Outer dark edge & Inner bright glare edge */
       border: 1px solid rgba(0, 0, 0, 0.35);
@@ -68,7 +68,7 @@ export class AeroCard extends LitElement {
     .aero-card-title {
       font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
       font-size: 13px;
-      color: #1e395b;
+      color: var(--cc-heading);
       margin: 2px 0 6px 6px;
       text-shadow:
         0 0 6px rgba(255, 255, 255, 0.9),
@@ -78,8 +78,8 @@ export class AeroCard extends LitElement {
 
     /* The Inset Client Area - housing the actual core form content safely */
     .aero-card-client-area {
-      background-color: #ffffff;
-      border: 1px solid #919191;
+      background-color: var(--cc-client);
+      border: 1px solid var(--cc-border);
       border-top-color: #6d6d6d; /* Deeper top socket shadows */
       border-radius: 2px;
       padding: 15px;

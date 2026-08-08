@@ -84,7 +84,7 @@ export class RoqueMediaViewer extends LitElement {
       border: 1px solid rgba(255, 255, 255, 0.35);
       border-radius: 50%;
       background: rgba(0, 0, 0, 0.45);
-      color: #fff;
+      color: var(--cc-client);
       font-size: 22px;
       line-height: 38px;
       text-align: center;
@@ -106,7 +106,7 @@ export class RoqueMediaViewer extends LitElement {
       border: 1px solid rgba(255, 255, 255, 0.3);
       border-radius: 50%;
       background: rgba(0, 0, 0, 0.4);
-      color: #fff;
+      color: var(--cc-client);
       font-size: 24px;
       line-height: 44px;
       text-align: center;

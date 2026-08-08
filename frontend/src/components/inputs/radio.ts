@@ -22,7 +22,7 @@ export class AeroRadio extends LitElement {
       align-items: center;
       gap: 6px;
       cursor: pointer;
-      color: #1e1e1e;
+      color: var(--cc-text);
       text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
     }
 
@@ -60,17 +60,17 @@ export class AeroRadio extends LitElement {
 
     /* Aero Hover Glow State */
     .aero-radio-label:hover .native-radio:not(:disabled) ~ .aero-circle {
-      border-color: #5b9ed6;
-      background: linear-gradient(to bottom, #f0f7fc 0%, #d8eaf7 100%);
+      border-color: var(--cc-accent-light);
+      background: linear-gradient(to bottom, var(--cc-fill-soft) 0%, var(--cc-fill-strong) 100%);
       box-shadow:
-        0 0 3px rgba(107, 180, 229, 0.6),
+        0 0 3px rgba(var(--cc-accent-rgb), 0.6),
         inset 1px 1px 1px rgba(0, 0, 0, 0.05);
     }
 
     /* Aero Focus Glow Ring */
     .native-radio:focus-visible ~ .aero-circle {
-      border-color: #3c7fb1;
-      box-shadow: 0 0 4px rgba(60, 127, 177, 0.8);
+      border-color: var(--cc-accent);
+      box-shadow: 0 0 4px rgba(var(--cc-accent-rgb), 0.8);
     }
 
     /* The Glossy Core Aqua Dot */
@@ -84,12 +84,12 @@ export class AeroRadio extends LitElement {
       /* Windows 7 / Vista Metallic Blue Radio Dot Gradient */
       background: linear-gradient(
         to bottom,
-        #7abcff 0%,
-        #60abf8 40%,
-        #1d7fed 50%,
-        #0059bf 100%
+        var(--cc-accent-light) 0%,
+        var(--cc-accent) 40%,
+        var(--cc-accent-strong) 50%,
+        var(--cc-accent-deep) 100%
       );
-      border: 1px solid #004b9a;
+      border: 1px solid var(--cc-accent-deep);
 
       opacity: 0;
       transform: scale(0.5);
@@ -100,7 +100,7 @@ export class AeroRadio extends LitElement {
 
     /* Checked State Layout adjustments */
     .native-radio:checked ~ .aero-circle {
-      background: linear-gradient(to bottom, #ffffff 0%, #e6f3ff 100%);
+      background: linear-gradient(to bottom, var(--cc-client) 0%, var(--cc-fill-strong) 100%);
     }
 
     .native-radio:checked ~ .aero-circle::after {
@@ -111,7 +111,7 @@ export class AeroRadio extends LitElement {
     /* Disabled State */
     .native-radio:disabled ~ .aero-circle {
       background: #f4f4f4;
-      border-color: #c0c0c0;
+      border-color: var(--cc-border-soft);
       box-shadow: none;
     }
 

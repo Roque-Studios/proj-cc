@@ -14,15 +14,29 @@
                 margin: 0;
                 padding: 0;
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background-color: #d1e4ef; /* fallback until /theme.css applies */
+                
                 background: linear-gradient(
                         180deg,
-                        rgba(173, 216, 230, 0.45) 0%,
+                        rgba(var(--cc-tint), 0.45) 0%,
                         rgba(255, 255, 255, 0.9) 40%
                     ),
-                    #d1e4ef;
+                    var(--cc-page-bg);
                 min-height: 100vh;
             }
         </style>
+        <link rel="stylesheet" href="/theme.css" />
+    <script>
+        /* FOUC guard: apply the persisted theme before first paint. */
+        (function () {
+            try {
+                var t = localStorage.getItem('cc_theme');
+                if (t === 'aero' || t === 'olive' || t === 'silver') {
+                    document.documentElement.setAttribute('data-theme', t);
+                }
+            } catch (e) {}
+        })();
+    </script>
     </head>
     <body>
         <roque-subscriber-feed-page></roque-subscriber-feed-page>

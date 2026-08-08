@@ -17,10 +17,23 @@
         <style>
             body {
                 margin: 0;
-                background-color: #d1e4ef;
+                background-color: #d1e4ef; /* fallback until /theme.css applies */
+                background-color: var(--cc-page-bg);
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             }
         </style>
+        <link rel="stylesheet" href="/theme.css" />
+    <script>
+        /* FOUC guard: apply the persisted theme before first paint. */
+        (function () {
+            try {
+                var t = localStorage.getItem('cc_theme');
+                if (t === 'aero' || t === 'olive' || t === 'silver') {
+                    document.documentElement.setAttribute('data-theme', t);
+                }
+            } catch (e) {}
+        })();
+    </script>
     </head>
     <body>
         <roque-login-page></roque-login-page>

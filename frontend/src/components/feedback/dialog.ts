@@ -49,7 +49,7 @@ export class RoqueDialog extends LitElement {
         rgba(0, 0, 0, 0.02) 40.1%,
         rgba(255, 255, 255, 0.25) 100%
       );
-      background-color: rgba(165, 200, 225, 0.45); /* Aero Glass Blue Tint */
+      background-color: rgba(var(--cc-glass), 0.45); /* Aero Glass Blue Tint */
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
       border: 1px solid rgba(255, 255, 255, 0.6);
@@ -79,7 +79,7 @@ export class RoqueDialog extends LitElement {
 
     .title-text {
       font-size: 12px;
-      color: #1e1e1e;
+      color: var(--cc-text);
       text-shadow: 0 0 6px rgba(255, 255, 255, 1), 0 0 3px rgba(255, 255, 255, 0.8);
     }
 
@@ -114,7 +114,7 @@ export class RoqueDialog extends LitElement {
     }
     
     .close-btn:hover::before {
-      color: #ffffff;
+      color: var(--cc-client);
       text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
     }
 
@@ -135,7 +135,7 @@ export class RoqueDialog extends LitElement {
 
     /* Core Message Section */
     .content-area {
-      background-color: #ffffff;
+      background-color: var(--cc-client);
       padding: 25px 20px;
       display: flex;
       gap: 15px;
@@ -194,8 +194,8 @@ export class RoqueDialog extends LitElement {
               <div class="icon-container">
                 <slot name="icon">
                   <svg width="32" height="32" viewBox="0 0 32 32">
-                    <circle cx="16" cy="16" r="14" fill="#e53e3e" stroke="#fff" stroke-width="2"/>
-                    <path d="M16 8v10M16 22h.01" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+                    <circle cx="16" cy="16" r="14" fill="var(--cc-danger)" stroke="var(--cc-client)" stroke-width="2"/>
+                    <path d="M16 8v10M16 22h.01" stroke="var(--cc-client)" stroke-width="3" stroke-linecap="round"/>
                   </svg>
                 </slot>
               </div>

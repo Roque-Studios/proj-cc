@@ -41,7 +41,7 @@ export class RoqueTabs extends LitElement {
         rgba(0, 0, 0, 0.02) 60.1%,
         rgba(255, 255, 255, 0.25) 100%
       );
-      background-color: rgba(185, 215, 235, 0.3);
+      background-color: rgba(var(--cc-tint), 0.3);
       border: 1px solid rgba(255, 255, 255, 0.45);
       border-bottom: 1px solid rgba(0, 0, 0, 0.15);
       border-radius: 4px 4px 0 0;
@@ -100,9 +100,9 @@ export class RoqueTabs extends LitElement {
     .tab-button.active {
       color: #000000;
       font-weight: 400;
-      background: #ffffff;
+      background: var(--cc-client);
       border-color: rgba(0, 0, 0, 0.25);
-      border-bottom: 1px solid #ffffff;
+      border-bottom: 1px solid var(--cc-client);
       box-shadow:
         inset 0 2px 0 #ff9933,
         inset 0 3px 0 rgba(255, 255, 255, 0.9);
@@ -115,7 +115,7 @@ export class RoqueTabs extends LitElement {
 
     .tab-panels {
       display: block;
-      background-color: #ffffff;
+      background-color: var(--cc-client);
       border: 1px solid rgba(0, 0, 0, 0.2);
       border-top: none;
       padding: 16px;

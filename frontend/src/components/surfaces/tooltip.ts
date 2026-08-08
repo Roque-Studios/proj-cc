@@ -19,7 +19,7 @@ export class RoqueTooltip extends LitElement {
     .roque-tooltip-bubble {
       position: absolute;
       background-color: #2c3e50;
-      color: #ffffff;
+      color: var(--cc-client);
       font-size: 11px;
       line-height: 1.4;
       padding: 6px 10px;

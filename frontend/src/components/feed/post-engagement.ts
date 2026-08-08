@@ -76,9 +76,9 @@ export class PostEngagement extends LitElement {
       padding: 4px 10px;
       font-family: inherit;
       font-size: 12px;
-      color: #3a5268;
-      background: linear-gradient(to bottom, rgba(255, 255, 255, 0.9), rgba(222, 234, 243, 0.75));
-      border: 1px solid rgba(90, 130, 165, 0.4);
+      color: var(--cc-header-ink-2);
+      background: linear-gradient(to bottom, rgba(255, 255, 255, 0.9), rgba(var(--cc-tint-warm), 0.75));
+      border: 1px solid rgba(var(--cc-tint-deep), 0.4);
       border-radius: 3px;
       cursor: pointer;
       transition: box-shadow 0.15s ease, transform 0.15s ease, background 0.15s ease;
@@ -86,7 +86,7 @@ export class PostEngagement extends LitElement {
     }
 
     .action:hover:not(:disabled) {
-      box-shadow: 0 0 5px rgba(60, 127, 177, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+      box-shadow: 0 0 5px rgba(var(--cc-accent-rgb), 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.8);
       transform: translateY(-1px);
     }
 
@@ -100,7 +100,7 @@ export class PostEngagement extends LitElement {
     }
 
     .action.liked {
-      color: #b03a4a;
+      color: var(--cc-danger);
       border-color: rgba(190, 60, 75, 0.5);
       background: linear-gradient(to bottom, #fdf1f2 0%, #f6d4da 100%);
     }
@@ -116,7 +116,7 @@ export class PostEngagement extends LitElement {
       gap: 4px;
       padding: 4px 10px;
       font-size: 12px;
-      color: #6b7a8a;
+      color: var(--cc-text-muted);
     }
 
     /* --- Comments --- */
@@ -147,7 +147,7 @@ export class PostEngagement extends LitElement {
     .comment-author {
       font-size: 12px;
       font-weight: 600;
-      color: #1e395b;
+      color: var(--cc-heading);
     }
 
     .comment-creator-tag {
@@ -161,7 +161,7 @@ export class PostEngagement extends LitElement {
 
     .comment-time {
       font-size: 10px;
-      color: #7a8794;
+      color: var(--cc-text-faint);
     }
 
     .comment-text {
@@ -189,7 +189,7 @@ export class PostEngagement extends LitElement {
     }
 
     .comment-del:hover {
-      color: #b03a3a;
+      color: var(--cc-danger);
     }
 
     .comment-del:disabled {
@@ -206,7 +206,7 @@ export class PostEngagement extends LitElement {
     .more-btn {
       font-family: inherit;
       font-size: 11px;
-      color: #3c7fb1;
+      color: var(--cc-accent);
       background: none;
       border: none;
       cursor: pointer;
@@ -220,7 +220,7 @@ export class PostEngagement extends LitElement {
     .comments-empty {
       padding: 8px 4px;
       font-size: 12px;
-      color: #7a8794;
+      color: var(--cc-text-faint);
       text-align: center;
     }
 
@@ -245,8 +245,8 @@ export class PostEngagement extends LitElement {
       font-size: 15px;
       line-height: 26px;
       text-align: center;
-      background: linear-gradient(to bottom, rgba(255, 255, 255, 0.9), rgba(222, 234, 243, 0.7));
-      border: 1px solid rgba(90, 130, 165, 0.35);
+      background: linear-gradient(to bottom, rgba(255, 255, 255, 0.9), rgba(var(--cc-tint-warm), 0.7));
+      border: 1px solid rgba(var(--cc-tint-deep), 0.35);
       border-radius: 3px;
       cursor: pointer;
       transition: transform 0.12s ease, box-shadow 0.12s ease;
@@ -254,7 +254,7 @@ export class PostEngagement extends LitElement {
 
     .emoji-btn:hover {
       transform: scale(1.18);
-      box-shadow: 0 0 4px rgba(60, 127, 177, 0.5);
+      box-shadow: 0 0 4px rgba(var(--cc-accent-rgb), 0.5);
     }
 
     .composer-row {

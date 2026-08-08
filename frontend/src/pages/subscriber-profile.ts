@@ -52,7 +52,7 @@ export class SubscriberProfile extends LitElement {
       margin: 0 0 14px;
       font-size: 22px;
       font-weight: 600;
-      color: #1e395b;
+      color: var(--cc-heading);
     }
 
     .page-head {
@@ -84,7 +84,7 @@ export class SubscriberProfile extends LitElement {
     }
 
     .info-label {
-      color: #5a6a7a;
+      color: var(--cc-text-secondary);
     }
 
     .info-value {
@@ -98,7 +98,7 @@ export class SubscriberProfile extends LitElement {
       padding: 16px;
       text-align: center;
       font-size: 13px;
-      color: #6b7a8a;
+      color: var(--cc-text-muted);
     }
 
     .sub-row {
@@ -129,7 +129,7 @@ export class SubscriberProfile extends LitElement {
 
     .sub-meta {
       font-size: 11px;
-      color: #6b7a8a;
+      color: var(--cc-text-muted);
       margin-top: 2px;
     }
 
@@ -141,18 +141,18 @@ export class SubscriberProfile extends LitElement {
     .days-num {
       font-size: 20px;
       font-weight: 700;
-      color: #1e395b;
+      color: var(--cc-heading);
       line-height: 1.1;
     }
 
     .days-label {
       font-size: 10px;
-      color: #6b7a8a;
+      color: var(--cc-text-muted);
     }
 
     .pw-note {
       font-size: 11px;
-      color: #6b7a8a;
+      color: var(--cc-text-muted);
       margin: 0 0 12px;
       line-height: 1.5;
     }
@@ -177,7 +177,7 @@ export class SubscriberProfile extends LitElement {
     .error-box {
       padding: 18px;
       text-align: center;
-      color: #721c24;
+      color: var(--cc-danger-strong);
       font-size: 13px;
     }
   `
@@ -354,7 +354,7 @@ export class SubscriberProfile extends LitElement {
                             <div class="days-label">days left</div>
                           </div>`
                         : html`<div class="days">
-                            <div class="days-num" style="font-size:12px;color:#8a97a5">—</div>
+                            <div class="days-num" style="font-size:12px;color:var(--cc-text-faint)">—</div>
                           </div>`}
                     </div>
                   `,

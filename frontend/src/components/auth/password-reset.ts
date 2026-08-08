@@ -55,13 +55,13 @@ export class PasswordReset extends LitElement {
       border: none;
       padding: 0;
       font: inherit;
-      color: #1e6fb4;
+      color: var(--cc-accent-strong);
       cursor: pointer;
       text-decoration: underline;
     }
 
     .back:hover {
-      color: #165a92;
+      color: var(--cc-accent-deep);
     }
 
     .notice {
@@ -80,7 +80,7 @@ export class PasswordReset extends LitElement {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 13px;
       word-break: break-all;
-      color: #1e395b;
+      color: var(--cc-heading);
     }
 
     /* Honeypot — off-screen, unfocusable, invisible to humans. */
@@ -262,7 +262,7 @@ export class PasswordReset extends LitElement {
                 @aero-input="${this._onConfirm}"
               ></roque-text-field>
             </div>
-            <p class="notice" style="color:#4a5b6e;background:#f1f5f9;border-color:#dbe4ee">
+            <p class="notice" style="color:var(--cc-text-secondary);background:#f1f5f9;border-color:#dbe4ee">
               Passwords need at least 8 characters, one lowercase, one
               uppercase and one digit. The code expires in 30 minutes.
             </p>

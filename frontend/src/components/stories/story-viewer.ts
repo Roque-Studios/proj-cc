@@ -63,7 +63,7 @@ export class StoryViewer extends LitElement {
       position: fixed;
       inset: 0;
       z-index: 10000;
-      background: #0b0f14;
+      background: var(--cc-dark);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -89,7 +89,7 @@ export class StoryViewer extends LitElement {
       margin: 0 auto;
       display: flex;
       flex-direction: column;
-      background: #0b0f14;
+      background: var(--cc-dark);
     }
 
     /* --- Progress bars --- */
@@ -120,7 +120,7 @@ export class StoryViewer extends LitElement {
       position: absolute;
       inset: 0;
       width: 0%;
-      background: #fff;
+      background: var(--cc-client);
       border-radius: 2px;
     }
 
@@ -149,7 +149,7 @@ export class StoryViewer extends LitElement {
       align-items: center;
       gap: 10px;
       padding: 8px 12px;
-      color: #fff;
+      color: var(--cc-client);
     }
 
     .story-head .creator {
@@ -181,7 +181,7 @@ export class StoryViewer extends LitElement {
       border: 1px solid rgba(255, 255, 255, 0.3);
       border-radius: 50%;
       background: rgba(255, 255, 255, 0.1);
-      color: #fff;
+      color: var(--cc-client);
       font-size: 18px;
       line-height: 32px;
       text-align: center;

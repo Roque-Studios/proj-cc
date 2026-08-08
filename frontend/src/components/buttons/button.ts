@@ -33,7 +33,7 @@ export class AeroButton extends LitElement {
         rgba(0, 0, 0, 0.05) 50.1%,
         rgba(255, 255, 255, 0.15) 100%
       );
-      background-color: rgba(173, 216, 230, 0.4); /* Base Aero Blue Tint */
+      background-color: rgba(var(--cc-tint), 0.4); /* Base Aero Blue Tint */
       border: 1px solid rgba(255, 255, 255, 0.6);
       outline: 1px solid rgba(0, 0, 0, 0.25);
       outline-offset: -1px;
@@ -67,8 +67,8 @@ export class AeroButton extends LitElement {
     }
 
     .aero-btn:hover {
-      background-color: rgba(200, 235, 255, 0.6);
-      outline-color: rgba(60, 128, 172, 0.6);
+      background-color: rgba(var(--cc-tint-hi), 0.6);
+      outline-color: rgba(var(--cc-accent-rgb), 0.6);
       box-shadow: 
         0 0 5px rgba(0, 162, 232, 0.5),
         inset 0 1px 0 rgba(255, 255, 255, 0.8);
@@ -83,8 +83,8 @@ export class AeroButton extends LitElement {
         rgba(255, 255, 255, 0.1) 50.1%,
         rgba(255, 255, 255, 0.2) 100%
       );
-      background-color: rgba(135, 180, 210, 0.5);
-      outline-color: rgba(30, 70, 100, 0.7);
+      background-color: rgba(var(--cc-tint-deep), 0.5);
+      outline-color: rgba(var(--cc-accent-rgb), 0.7);
       box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
     }
   `;

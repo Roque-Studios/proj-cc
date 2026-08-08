@@ -25,7 +25,7 @@ export class AeroMenu extends LitElement {
       padding: 3px; /* Standard compact desktop padding boundaries */
       margin: 2px 0 0;
       list-style: none;
-      background-color: #ffffff;
+      background-color: var(--cc-client);
 
       /* Pure sharp desktop application borders with strong drop depth shadows */
       border: 1px solid #979797;

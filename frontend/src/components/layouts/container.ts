@@ -24,16 +24,16 @@ export class AeroContainer extends LitElement {
       /* Classic Windows 7 / Vista client background canvas gradient */
       background: linear-gradient(
         180deg,
-        #f2f7fa 0%,
-        #e5eef4 40%,
-        #dbe7f0 100%
+        var(--cc-fill-soft) 0%,
+        var(--cc-fill) 40%,
+        var(--cc-fill-strong) 100%
       );
-      background-color: #e5eef4;
+      background-color: var(--cc-fill);
 
       /* Crisp, subtle interior drop shadow from the main OS chrome windows */
       box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.05);
       border-radius: 3px;
-      border: 1px solid #b9cbd7;
+      border: 1px solid var(--cc-border-soft);
     }
 
     /* Layout structural sizing options */

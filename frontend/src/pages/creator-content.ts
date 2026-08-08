@@ -77,13 +77,13 @@ export class CreatorContentManager extends LitElement {
       margin: 0;
       font-size: 22px;
       font-weight: normal;
-      color: #1e395b;
+      color: var(--cc-heading);
     }
 
     .topbar p {
       margin: 4px 0 0;
       font-size: 12px;
-      color: #4a5b6e;
+      color: var(--cc-text-secondary);
       max-width: 560px;
       line-height: 1.5;
     }
@@ -107,9 +107,9 @@ export class CreatorContentManager extends LitElement {
       background: linear-gradient(
         to bottom,
         rgba(255, 255, 255, 0.85) 0%,
-        rgba(235, 245, 250, 0.7) 100%
+        rgba(var(--cc-tint-warm), 0.7) 100%
       );
-      border: 1px solid rgba(90, 130, 165, 0.35);
+      border: 1px solid rgba(var(--cc-tint-deep), 0.35);
       border-radius: 4px;
       padding: 10px 12px;
       text-align: center;
@@ -118,12 +118,12 @@ export class CreatorContentManager extends LitElement {
     .stat .value {
       font-size: 20px;
       font-weight: 600;
-      color: #1e395b;
+      color: var(--cc-heading);
     }
 
     .stat .label {
       font-size: 10px;
-      color: #4a5b6e;
+      color: var(--cc-text-secondary);
       margin-top: 2px;
     }
 
@@ -154,7 +154,7 @@ export class CreatorContentManager extends LitElement {
       object-fit: cover;
       border: 1px solid #c8d4de;
       border-radius: 4px;
-      background: #eef3f7;
+      background: var(--cc-fill);
     }
 
     .caption {
@@ -169,7 +169,7 @@ export class CreatorContentManager extends LitElement {
     }
 
     .caption.empty {
-      color: #8a97a5;
+      color: var(--cc-text-faint);
       font-style: italic;
     }
 
@@ -189,8 +189,8 @@ export class CreatorContentManager extends LitElement {
 
     .meta .chip {
       font-size: 11px;
-      color: #3a5268;
-      background: #eef3f8;
+      color: var(--cc-header-ink-2);
+      background: var(--cc-fill);
       border: 1px solid #d3dde6;
       border-radius: 3px;
       padding: 2px 7px;
@@ -236,13 +236,13 @@ export class CreatorContentManager extends LitElement {
 
     .dialog-note {
       font-size: 12px;
-      color: #4a5b6e;
+      color: var(--cc-text-secondary);
       line-height: 1.5;
       margin: 0;
     }
 
     .empty {
-      color: #6b7a8a;
+      color: var(--cc-text-muted);
       font-size: 13px;
       padding: 30px;
       text-align: center;
@@ -271,8 +271,8 @@ export class CreatorContentManager extends LitElement {
       gap: 4px;
       padding: 18px 12px;
       text-align: center;
-      color: #1e395b;
-      background: #f6fafc;
+      color: var(--cc-heading);
+      background: var(--cc-fill);
       border: 1px dashed #9db8cc;
       border-radius: 4px;
       cursor: pointer;
@@ -280,13 +280,13 @@ export class CreatorContentManager extends LitElement {
     }
 
     .file-picker:hover {
-      border-color: #3c7fb1;
-      background: #eaf4fb;
+      border-color: var(--cc-accent);
+      background: var(--cc-fill-soft);
     }
 
     .file-hint {
       font-size: 11px;
-      color: #6b7a8a;
+      color: var(--cc-text-muted);
     }
 
     .picks {
@@ -308,7 +308,7 @@ export class CreatorContentManager extends LitElement {
       object-fit: cover;
       border: 1px solid #c8d4de;
       border-radius: 4px;
-      background: #eef3f7;
+      background: var(--cc-fill);
     }
 
     .pick-remove {
@@ -320,8 +320,8 @@ export class CreatorContentManager extends LitElement {
       line-height: 18px;
       padding: 0;
       font-size: 14px;
-      color: #fff;
-      background: #b03a3a;
+      color: var(--cc-client);
+      background: var(--cc-danger);
       border: 1px solid #7a1d12;
       border-radius: 50%;
       cursor: pointer;
@@ -355,13 +355,13 @@ export class CreatorContentManager extends LitElement {
       margin: 0;
       font-size: 16px;
       font-weight: 600;
-      color: #1e395b;
+      color: var(--cc-heading);
     }
 
     .stories-sub {
       margin: 3px 0 0;
       font-size: 12px;
-      color: #5a6a7a;
+      color: var(--cc-text-secondary);
       line-height: 1.5;
       max-width: 480px;
     }
@@ -369,11 +369,11 @@ export class CreatorContentManager extends LitElement {
     .stories-empty {
       padding: 14px;
       text-align: center;
-      color: #6b7a8a;
+      color: var(--cc-text-muted);
       font-size: 12px;
       border: 1px dashed #c8d4de;
       border-radius: 4px;
-      background: #f8fbfd;
+      background: var(--cc-fill);
     }
 
     .stories-row {
@@ -394,10 +394,10 @@ export class CreatorContentManager extends LitElement {
       width: 150px;
       height: 150px;
       object-fit: cover;
-      border: 1px solid #2eb82e;
+      border: 1px solid var(--cc-success);
       border-radius: 6px;
-      background: #eef3f7;
-      box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(46, 184, 46, 0.6);
+      background: var(--cc-fill);
+      box-shadow: 0 0 0 2px var(--cc-client), 0 0 0 3px rgba(46, 184, 46, 0.6);
     }
 
     .story-meta {

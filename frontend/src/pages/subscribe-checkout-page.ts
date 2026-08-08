@@ -50,14 +50,14 @@ export class SubscribeCheckoutPage extends LitElement {
     .header-name {
       margin: 0;
       font-size: 17px;
-      color: #1e395b;
+      color: var(--cc-heading);
       font-weight: 600;
     }
 
     .header-handle {
       margin: 2px 0 0;
       font-size: 12px;
-      color: #5a6a7a;
+      color: var(--cc-text-secondary);
     }
 
     .prompt {
@@ -69,20 +69,20 @@ export class SubscribeCheckoutPage extends LitElement {
       margin: 0 0 6px;
       font-size: 14px;
       font-weight: 600;
-      color: #1e395b;
+      color: var(--cc-heading);
     }
 
     .prompt-sub {
       margin: 0 0 14px;
       font-size: 12px;
-      color: #5a6a7a;
+      color: var(--cc-text-secondary);
       line-height: 1.5;
     }
 
     .error-box {
       padding: 18px;
       text-align: center;
-      color: #721c24;
+      color: var(--cc-danger-strong);
       font-size: 13px;
     }
 

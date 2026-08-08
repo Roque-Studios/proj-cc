@@ -87,7 +87,7 @@ export class SubscriberFeed extends LitElement {
 
     .post-date {
       font-size: 11px;
-      color: #6b7a8a;
+      color: var(--cc-text-muted);
     }
 
     .post-caption {
@@ -110,7 +110,7 @@ export class SubscriberFeed extends LitElement {
       border-radius: 5px;
       overflow: hidden;
       border: 1px solid #d0d0d0;
-      background: #0e1621;
+      background: var(--cc-dark);
     }
 
     .media-img {
@@ -129,8 +129,8 @@ export class SubscriberFeed extends LitElement {
       align-items: center;
       justify-content: center;
       background:
-        radial-gradient(circle at 30% 20%, rgba(173, 216, 230, 0.35), transparent 60%),
-        linear-gradient(160deg, #33404f 0%, #1b2633 100%);
+        radial-gradient(circle at 30% 20%, rgba(var(--cc-tint), 0.35), transparent 60%),
+        linear-gradient(160deg, var(--cc-header-ink-2) 0%, var(--cc-dark) 100%);
       overflow: hidden;
     }
 
@@ -212,7 +212,7 @@ export class SubscriberFeed extends LitElement {
     /* --- Non-follower teaser --- */
     .teaser-note {
       font-size: 12px;
-      color: #5a6a7a;
+      color: var(--cc-text-secondary);
       padding: 10px;
       text-align: center;
       background: rgba(255, 255, 255, 0.55);
@@ -227,7 +227,7 @@ export class SubscriberFeed extends LitElement {
       border-radius: 5px;
       overflow: hidden;
       border: 1px solid #d0d0d0;
-      background: #0e1621;
+      background: var(--cc-dark);
     }
 
     .carousel-track {
@@ -265,7 +265,7 @@ export class SubscriberFeed extends LitElement {
       border: 1px solid rgba(255, 255, 255, 0.45);
       border-radius: 50%;
       background: rgba(10, 18, 26, 0.55);
-      color: #fff;
+      color: var(--cc-client);
       font-size: 18px;
       line-height: 30px;
       text-align: center;
@@ -275,7 +275,7 @@ export class SubscriberFeed extends LitElement {
     }
 
     .carousel-arrow:hover {
-      background: rgba(60, 127, 177, 0.85);
+      background: rgba(var(--cc-accent-rgb), 0.85);
       transform: translateY(-50%) scale(1.08);
     }
 
@@ -330,13 +330,13 @@ export class SubscriberFeed extends LitElement {
       justify-content: center;
       padding: 18px 0 8px;
       font-size: 12px;
-      color: #7a8794;
+      color: var(--cc-text-faint);
     }
 
     .error-box {
       padding: 16px;
       text-align: center;
-      color: #721c24;
+      color: var(--cc-danger-strong);
       font-size: 13px;
     }
   `

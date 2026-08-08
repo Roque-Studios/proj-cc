@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.39.0] - 2026-08-08
+### Added
+- **Theming system (Windows 7-era palettes)**: the app was already Aero-styled, so theming meant tokenizing the chrome. New `/theme.css` defines **37 CSS custom-property tokens** on `:root` (the current look, now called **Aero**) plus **Olive Green** and **Silver** palette blocks (`[data-theme="olive"]` / `[data-theme="silver"]`). Glass tints are stored as RGB triplets so `rgba(var(--cc-tint), 0.4)` stays themeable; the navy header gradient, headings, accent, page background, text grays and light fills all swap per theme while semantic colors (success/danger/warning/dark media surfaces) stay fixed. ~52 files (components, pages, and all 9 HTML entry backgrounds) migrated from hardcoded colors to `var(--cc-*)` — **345 token references, zero undefined**
+- **Theme picker** (`roque-theme-picker`): a row of Aero/Olive/Silver swatch chips (with fallback-safe CSS), reachable from the shared hamburger drawer (`site-menu.ts`) and the admin dashboard (`/admin`, above the tabs). Picking swaps `data-theme` on `<html>` instantly (CSS variables re-evaluate, no reload) and persists to `localStorage["cc_theme"]`
+- **FOUC guard**: every page `<head>` now links `/theme.css` and runs a tiny synchronous inline script that restores the persisted theme before first paint; the inline body styles also keep a literal `#d1e4ef` fallback so backgrounds never flash transparent while the stylesheet loads
+
+### Changed
+- Collapsed several secondary text grays into shared tokens (`#5a6a7a`/`#4a5b6e` → `--cc-text-secondary`, `#7a8794`/`#8a97a5` → `--cc-text-faint`) — a near-imperceptible shift in the default Aero look, traded for clean theme coverage
+- Neutralized the unused Vite scaffold `index.css` (its flex-centered body + dark-mode override would break layouts if ever imported)
+
 ## [0.38.0] - 2026-08-08
 ### Added
 - **Rate limiting on the auth endpoints** (custom Redis-backed limiter, `app/ratelimit.py`): `register`, `login`, `refresh`, `forgot-password` and `reset-password` — every unauthenticated auth call is now throttled with per-IP and per-(IP, email) budgets (a light per-IP budget also guards the challenge endpoint itself). Login allows 5 tries per (IP, email) / 20 per IP per 15 min (plus a per-IP budget on refresh), forgot-password 3 per email per hour, register 5 per IP per hour — over-limit requests get `429` + a `Retry-After` header. The store is a Redis fixed-window counter (`INCR` + `EXPIRE`, DB 4 via `RATE_LIMIT_REDIS_URL`, same fail-open convention as the watermark cache: a Redis outage degrades, never locks everyone out). `TRUST_PROXY_HEADERS` gates `X-Forwarded-For` parsing behind nginx; tests use an in-memory store (541 passed)

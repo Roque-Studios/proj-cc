@@ -65,9 +65,9 @@ export class SubscriberFeedPage extends LitElement {
       border-radius: 5px 5px 0 0;
       overflow: hidden;
       background:
-        radial-gradient(circle at 20% 20%, rgba(173, 216, 230, 0.55), transparent 55%),
-        radial-gradient(circle at 80% 60%, rgba(120, 160, 200, 0.4), transparent 50%),
-        linear-gradient(135deg, #2c3e50 0%, #1e395b 55%, #14212f 100%);
+        radial-gradient(circle at 20% 20%, rgba(var(--cc-tint), 0.55), transparent 55%),
+        radial-gradient(circle at 80% 60%, rgba(var(--cc-tint-deep), 0.4), transparent 50%),
+        var(--cc-header-grad);
     }
 
     .hero-banner-img {
@@ -111,7 +111,7 @@ export class SubscriberFeedPage extends LitElement {
     .hero-name {
       margin: 0;
       font-size: 20px;
-      color: #1e395b;
+      color: var(--cc-heading);
       font-weight: 600;
       line-height: 1.25;
     }
@@ -122,8 +122,8 @@ export class SubscriberFeedPage extends LitElement {
       width: 10px;
       height: 10px;
       border-radius: 50%;
-      background: #35c759;
-      border: 2px solid #fff;
+      background: var(--cc-success-soft);
+      border: 2px solid var(--cc-client);
       box-shadow: 0 0 0 0 rgba(53, 199, 89, 0.55);
       animation: online-pulse 2.2s ease-out infinite;
     }
@@ -143,7 +143,7 @@ export class SubscriberFeedPage extends LitElement {
     .hero-handle {
       margin: 3px 0 0;
       font-size: 12px;
-      color: #5a6a7a;
+      color: var(--cc-text-secondary);
     }
 
     .hero-posts {
@@ -151,9 +151,9 @@ export class SubscriberFeedPage extends LitElement {
       margin-left: 8px;
       padding: 1px 8px;
       font-size: 11px;
-      color: #1e395b;
-      background: rgba(173, 216, 230, 0.35);
-      border: 1px solid rgba(90, 130, 165, 0.4);
+      color: var(--cc-heading);
+      background: rgba(var(--cc-tint), 0.35);
+      border: 1px solid rgba(var(--cc-tint-deep), 0.4);
       border-radius: 999px;
     }
 
@@ -186,11 +186,11 @@ export class SubscriberFeedPage extends LitElement {
       gap: 6px;
       padding: 5px 10px;
       font-size: 12px;
-      color: #1e395b;
+      color: var(--cc-heading);
       background: linear-gradient(
         to bottom,
         rgba(255, 255, 255, 0.75),
-        rgba(173, 216, 230, 0.35)
+        rgba(var(--cc-tint), 0.35)
       );
       border: 1px solid rgba(0, 0, 0, 0.2);
       border-radius: 999px;
@@ -244,20 +244,20 @@ export class SubscriberFeedPage extends LitElement {
       margin: 0 0 6px;
       font-size: 14px;
       font-weight: 600;
-      color: #1e395b;
+      color: var(--cc-heading);
     }
 
     .prompt-sub {
       margin: 0 0 14px;
       font-size: 12px;
-      color: #5a6a7a;
+      color: var(--cc-text-secondary);
       line-height: 1.5;
     }
 
     .error-box {
       padding: 18px;
       text-align: center;
-      color: #721c24;
+      color: var(--cc-danger-strong);
       font-size: 13px;
     }
 

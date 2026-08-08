@@ -123,7 +123,7 @@ export class MyElement extends LitElement {
     :host {
       --text: #6b6375;
       --text-h: #08060d;
-      --bg: #fff;
+      --bg: var(--cc-client);
       --border: #e5e4e7;
       --code-bg: #f4f3ec;
       --accent: #aa3bff;
