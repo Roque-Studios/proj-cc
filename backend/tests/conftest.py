@@ -133,6 +133,21 @@ def _fake_watermark_cache(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _in_memory_rate_limits(monkeypatch):
+    """The auth rate limiter runs on a fresh in-memory store per test.
+
+    Without this the module-level store would be a real Redis client (a
+    network call per auth request — or fail-open). A fresh store per test also
+    keeps auth quotas from leaking between tests.
+    """
+    from app import ratelimit as ratelimit_module
+
+    store = ratelimit_module.InMemoryRateLimitStore()
+    monkeypatch.setattr(ratelimit_module, "_store", store)
+    yield store
+
+
+@pytest.fixture(autouse=True)
 def _fake_realtime(monkeypatch):
     """The realtime manager runs on an in-memory pub/sub hub (no Redis).
 

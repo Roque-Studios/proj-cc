@@ -85,6 +85,25 @@ export interface UserMe {
   is_active: boolean
 }
 
+/** Anti-bot extras sent with auth requests (honeypot + proof-of-work). */
+export interface AntiBot {
+  website?: string
+  pow?: {
+    challenge: string
+    issued_at: number
+    signature: string
+    nonce: string
+  } | null
+}
+
+export interface PowChallenge {
+  challenge: string
+  issued_at: number
+  signature: string
+  difficulty: number
+  ttl_seconds: number
+}
+
 export interface GatewayField {
   name: string
   label: string
@@ -445,18 +464,33 @@ export interface MessagesStatus {
 }
 
 export const api = {
-  login(email: string, password: string): Promise<TokenResponse> {
+  login(email: string, password: string, antiBot?: AntiBot): Promise<TokenResponse> {
     return request<TokenResponse>('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, ...(antiBot ?? {}) }),
     })
   },
 
-  register(email: string, password: string, username?: string): Promise<UserMe> {
+  register(
+    email: string,
+    password: string,
+    username?: string,
+    antiBot?: AntiBot,
+  ): Promise<UserMe> {
     return request<UserMe>('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password, username: username || null }),
+      body: JSON.stringify({
+        email,
+        password,
+        username: username || null,
+        ...(antiBot ?? {}),
+      }),
     })
+  },
+
+  // A signed proof-of-work challenge the auth forms solve before submitting.
+  getPowChallenge(): Promise<PowChallenge> {
+    return request<PowChallenge>('/auth/pow-challenge')
   },
 
   me(): Promise<UserMe> {
@@ -473,10 +507,13 @@ export const api = {
     })
   },
 
-  forgotPassword(email: string): Promise<{ sent: boolean; dev_token?: string | null }> {
+  forgotPassword(
+    email: string,
+    antiBot?: AntiBot,
+  ): Promise<{ sent: boolean; dev_token?: string | null }> {
     return request<{ sent: boolean; dev_token?: string | null }>('/auth/forgot-password', {
       method: 'POST',
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ email, ...(antiBot ?? {}) }),
     })
   },
 

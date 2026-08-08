@@ -42,6 +42,22 @@ class Settings(BaseSettings):
     # JWT token revocation list (Redis; defaults to REDIS_URL, DB 3)
     TOKEN_REVOCATION_REDIS_URL: str = ""
 
+    # Auth rate limiting (Redis; defaults to REDIS_URL, DB 4)
+    RATE_LIMIT_REDIS_URL: str = ""
+    # Whether to trust X-Forwarded-For for client-IP rate limiting. On behind
+    # our own nginx this is safe (nginx appends the real remote addr); disable
+    # when exposed directly so headers can't be spoofed.
+    TRUST_PROXY_HEADERS: bool = True
+
+    # Anti-bot (auth endpoints): client-side proof-of-work difficulty in
+    # leading-zero SHA-256 bits. 0 disables PoW (dev/tests/default); 16 is a
+    # good production value (~0.2-0.5 s of work per submit).
+    AUTH_POW_DIFFICULTY: int = 0
+    # How long an issued PoW challenge stays valid (and replayable) in seconds.
+    AUTH_POW_TTL_SECONDS: int = 120
+    # Honeypot "website" field on register/login/forgot — filled only by bots.
+    AUTH_HONEYPOT_ENABLED: bool = True
+
     # Payment gateway (mock | stripe | paypal). "mock" is the default so the
     # stack runs with zero credentials; switching gateways is a config change
     # only (see app/payments/factory.py).
@@ -146,6 +162,11 @@ class Settings(BaseSettings):
     def token_revocation_redis_url(self) -> str:
         """Redis URL for the JWT revocation list (defaults to REDIS_URL, DB 3)."""
         return self.TOKEN_REVOCATION_REDIS_URL or self._redis_db_url(3)
+
+    @property
+    def rate_limit_redis_url(self) -> str:
+        """Redis URL for the auth rate limiter (defaults to REDIS_URL, DB 4)."""
+        return self.RATE_LIMIT_REDIS_URL or self._redis_db_url(4)
 
     class Config:
         env_file = ".env"

@@ -8,6 +8,8 @@ import '../components/feedback/alert.ts'
 import '../components/feedback/spinner.ts'
 import '../components/auth/password-reset.ts'
 import { api, ApiError, getAccessToken, setTokens } from '../lib/api'
+import { makePowProof, type PowProof } from '../lib/pow'
+import type { AntiBot } from '../lib/api'
 
 /**
  * Shared sign-in page for every role (`/login`).
@@ -28,6 +30,8 @@ export class LoginPage extends LitElement {
   @state() private error = ''
   @state() private busy = false
   @state() private checking = !!getAccessToken()
+  // Honeypot: a visually-hidden field real users never see — bots auto-fill it.
+  @state() private website = ''
 
   static styles = css`
     :host {
@@ -111,6 +115,17 @@ export class LoginPage extends LitElement {
       justify-content: center;
       padding: 60px 0;
     }
+
+    /* Honeypot — off-screen, unfocusable, invisible to humans. */
+    .hp-field {
+      position: absolute;
+      left: -9999px;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
   `
 
   connectedCallback() {
@@ -162,6 +177,23 @@ export class LoginPage extends LitElement {
     this._go(isCreator ? '/admin' : this._safeNext() ?? '/')
   }
 
+  private async _antiBot(): Promise<AntiBot> {
+    // Solve the server's proof-of-work (skipped when disabled) and include the
+    // honeypot value — both together cost bots time and catch naive scrapers.
+    // A transient challenge-fetch failure degrades to no proof: when PoW is
+    // actually enabled the server answers 403 with a clear retry message.
+    let pow: PowProof | null = null
+    try {
+      pow = await makePowProof(() => api.getPowChallenge())
+    } catch {
+      pow = null
+    }
+    return {
+      website: this.website.trim() || undefined,
+      pow,
+    }
+  }
+
   private async _submit() {
     if (this.busy) return
     this.error = ''
@@ -183,11 +215,12 @@ export class LoginPage extends LitElement {
 
     this.busy = true
     try {
+      const antiBot = await this._antiBot()
       if (this.mode === 'register') {
-        await api.register(email, this.password, this.username.trim() || undefined)
+        await api.register(email, this.password, this.username.trim() || undefined, antiBot)
         // Registration doesn't return tokens — sign in right after.
       }
-      const tokens = await api.login(email, this.password)
+      const tokens = await api.login(email, this.password, antiBot)
       setTokens(tokens.access_token, tokens.refresh_token)
       await this._afterAuth()
     } catch (err) {
@@ -199,6 +232,10 @@ export class LoginPage extends LitElement {
             : 'Login failed — please try again.'
       this.busy = false
     }
+  }
+
+  private _onWebsite(e: Event) {
+    this.website = (e.target as HTMLInputElement).value ?? ''
   }
 
   private _toggleMode() {
@@ -256,6 +293,17 @@ export class LoginPage extends LitElement {
               ? 'Enter your email to receive a reset code'
               : 'Sign in to subscribe to creators'}</p>
           </div>
+
+          <input
+            class="hp-field"
+            type="text"
+            name="website"
+            tabindex="-1"
+            autocomplete="off"
+            aria-hidden="true"
+            .value="${this.website}"
+            @input="${this._onWebsite}"
+          />
 
           <roque-card heading="${isReset
             ? 'Password reset'

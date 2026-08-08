@@ -7,7 +7,7 @@ import time
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -17,6 +17,13 @@ from ..config import settings
 from ..database import get_db
 from ..deps import get_current_user
 from ..models import User, UserRole
+from ..pow import issue_challenge, verify as verify_pow
+from ..ratelimit import (
+    check_rate_limit,
+    client_ip,
+    email_scope_key,
+    rate_limit,
+)
 from ..schemas import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
@@ -97,9 +104,74 @@ def _revoke_claims(claims: dict[str, Any]) -> None:
         revoke_token(jti, _remaining_ttl_seconds(claims))
 
 
+@router.get(
+    "/pow-challenge",
+    response_model=dict,
+    # Light per-IP budget — issuing is cheap, but an unthrottled challenge
+    # endpoint is a free CPU/bandwidth amplifier with no cost to the caller.
+    dependencies=[rate_limit("pow-challenge", window_seconds=60, max_requests=30)],
+)
+def pow_challenge():
+    """Issue a signed proof-of-work challenge for the auth forms.
+
+    The client solves it (WebCrypto SHA-256 nonce search) and submits the
+    proof with register / login / forgot-password. When PoW is disabled
+    (``AUTH_POW_DIFFICULTY=0``) this still returns a shape with ``difficulty:
+    0`` so the client can skip the work.
+    """
+    return issue_challenge()
+
+
+def _reject_honeypot() -> bool:
+    """True when the honeypot gate is enabled and should silently fake-success.
+
+    The actual fake-success response is produced by the caller (it must match
+    the endpoint's response model) — the helper just decides the gate.
+    """
+    return settings.AUTH_HONEYPOT_ENABLED
+
+
+def _require_pow(pow_proof) -> None:
+    """Reject a request whose proof-of-work is missing/invalid (when enabled)."""
+    if settings.AUTH_POW_DIFFICULTY <= 0:
+        return
+    if pow_proof is None or not verify_pow(
+        pow_proof.challenge,
+        pow_proof.issued_at,
+        pow_proof.signature,
+        pow_proof.nonce,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Proof-of-work verification failed — please refresh and try again.",
+        )
+
+
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def register(payload: UserRegister, db: Session = Depends(get_db)):
-    """Create a new user. Duplicate emails are rejected with 409."""
+def register(
+    payload: UserRegister,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: None = rate_limit("register", window_seconds=3600, max_requests=5),
+):
+    """Create a new user. Duplicate emails are rejected with 409.
+
+    Rate-limited per IP (5/hour). Honeypot-filled requests silently fake-
+    succeed (no account created) so bots believe they won. Requires a valid
+    proof-of-work when PoW is enabled.
+    """
+    if _reject_honeypot() and (payload.website or "").strip():
+        # Fake success: same 201 shape, no row, no work done.
+        logger.info("register honeypot tripped", ip=client_ip(request))
+        return UserOut(
+            id=0,
+            email=str(payload.email),
+            username=payload.username or "bot",
+            role="registered",
+            is_creator=False,
+            is_active=False,
+        )
+    _require_pow(payload.pow)
     email = _normalize_email(str(payload.email))
     existing = db.scalar(select(User).where(User.email == email))
     if existing:
@@ -133,9 +205,33 @@ def register(payload: UserRegister, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(payload: UserLogin, db: Session = Depends(get_db)):
-    """Authenticate and return JWT access + refresh tokens."""
+def login(
+    payload: UserLogin,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: None = rate_limit("login", window_seconds=300, max_requests=20),
+):
+    """Authenticate and return JWT access + refresh tokens.
+
+    Rate-limited per IP (20/5 min) and per (IP + email) (5/15 min) to slow
+    credential stuffing without allowing a permanent email lockout.
+    """
     email = _normalize_email(str(payload.email))
+    if _reject_honeypot() and (payload.website or "").strip():
+        logger.info("login honeypot tripped", ip=client_ip(request))
+        return TokenResponse(
+            access_token="honeypot-rejected",
+            refresh_token="honeypot-rejected",
+        )
+    _require_pow(payload.pow)
+    # Per (IP, email) budget — checked inline (the body is only parsed here).
+    ip = client_ip(request)
+    check_rate_limit(
+        "login-ip-email",
+        f"{ip}:{email_scope_key(email)}",
+        window_seconds=900,
+        max_requests=5,
+    )
     user = db.scalar(select(User).where(User.email == email))
     if user is None:
         # Equalize response timing so unknown emails aren't detectable.
@@ -156,7 +252,11 @@ def login(payload: UserLogin, db: Session = Depends(get_db)):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
+def refresh(
+    payload: RefreshRequest,
+    db: Session = Depends(get_db),
+    _: None = rate_limit("refresh", window_seconds=600, max_requests=30),
+):
     """Rotate a valid refresh token: revoke it and issue a fresh pair."""
     claims = decode_token(payload.refresh_token)
     if claims is None or claims.get("type") != "refresh":
@@ -211,7 +311,9 @@ def me(user: User = Depends(get_current_user)):
 @router.post("/forgot-password", response_model=ForgotPasswordResponse)
 def forgot_password(
     payload: ForgotPasswordRequest,
+    request: Request,
     db: Session = Depends(get_db),
+    _: None = rate_limit("forgot", window_seconds=3600, max_requests=5),
 ):
     """Request a password-reset code for an email.
 
@@ -221,6 +323,16 @@ def forgot_password(
     the flow works without a mail server (development / mock setups).
     """
     email = _normalize_email(payload.email)
+    if _reject_honeypot() and (payload.website or "").strip():
+        logger.info("forgot-password honeypot tripped", ip=client_ip(request))
+        return ForgotPasswordResponse(sent=True)
+    _require_pow(payload.pow)
+    check_rate_limit(
+        "forgot-email",
+        email_scope_key(email),
+        window_seconds=3600,
+        max_requests=3,
+    )
     user = db.scalar(select(User).where(User.email == email, User.is_active.is_(True)))
     if user is None:
         # Same response as success: don't let the endpoint enumerate accounts.
@@ -247,12 +359,14 @@ def forgot_password(
 def reset_password(
     payload: ResetPasswordRequest,
     db: Session = Depends(get_db),
+    _: None = rate_limit("reset", window_seconds=3600, max_requests=20),
 ):
     """Set a new password with a short-lived reset code.
 
     Only ``type: "reset"`` tokens are accepted — an access or refresh token
     can never be replayed here. Invalid, expired or wrong-typed codes are all
     answered identically (400) so the endpoint can't be used to probe tokens.
+    Rate-limited per IP (20/hour) and per email (10/hour).
     """
     claims = decode_token(payload.token)
     if claims is None or claims.get("type") != "reset":
@@ -266,6 +380,12 @@ def reset_password(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired reset code",
         )
+    check_rate_limit(
+        "reset-email",
+        email_scope_key(user.email),
+        window_seconds=3600,
+        max_requests=10,
+    )
     user.hashed_password = hash_password(payload.new_password)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -276,6 +396,7 @@ def change_password(
     payload: ChangePasswordRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    _: None = rate_limit("change-pw", window_seconds=3600, max_requests=10),
 ):
     """Verify the current password and set a new one.
 

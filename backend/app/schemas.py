@@ -23,12 +23,34 @@ def validate_password_complexity(value: str) -> str:
     return value
 
 
+class PoWProof(BaseModel):
+    """A solved proof-of-work for an auth request.
+
+    The client fetches a signed challenge (``GET /auth/pow-challenge``), finds
+    a ``nonce`` such that ``sha256(challenge + "." + nonce)`` has the required
+    number of leading zero bits, and echoes the challenge fields back with it.
+    The server verifies the signature, freshness and difficulty (single-use —
+    the challenge is consumed on first success). Optional when PoW is disabled
+    (``AUTH_POW_DIFFICULTY=0``).
+    """
+
+    challenge: str = Field(min_length=8, max_length=128)
+    issued_at: int
+    signature: str = Field(min_length=8, max_length=128)
+    nonce: str = Field(min_length=1, max_length=256)
+
+
 class UserRegister(BaseModel):
     """Registration payload: email/password (username optional, derived from email)."""
 
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
     username: str | None = Field(default=None, min_length=3, max_length=50)
+    # Honeypot — a visually-hidden field real users never see; bots auto-fill
+    # it. When set, the endpoint silently fake-succeeds (no account is made).
+    website: str | None = Field(default=None, max_length=500)
+    # Client proof-of-work (required when AUTH_POW_DIFFICULTY > 0).
+    pow: PoWProof | None = None
 
     @field_validator("password")
     @classmethod
@@ -63,6 +85,9 @@ class ForgotPasswordRequest(BaseModel):
     """Request a password reset code for an email address."""
 
     email: EmailStr
+    # Honeypot + proof-of-work (same anti-bot surface as register/login).
+    website: str | None = Field(default=None, max_length=500)
+    pow: PoWProof | None = None
 
 
 class ForgotPasswordResponse(BaseModel):
@@ -103,6 +128,9 @@ class ResetPasswordRequest(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+    # Honeypot + proof-of-work (bots skip the hidden field and the work).
+    website: str | None = Field(default=None, max_length=500)
+    pow: PoWProof | None = None
 
 
 class RefreshRequest(BaseModel):

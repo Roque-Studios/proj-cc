@@ -5,6 +5,8 @@ import '../inputs/text-field.ts'
 import '../buttons/button.ts'
 import '../feedback/alert.ts'
 import { api, ApiError } from '../../lib/api'
+import { makePowProof, type PowProof } from '../../lib/pow'
+import type { AntiBot } from '../../lib/api'
 
 /**
  * Shared "forgot password" flow for every role.
@@ -28,6 +30,8 @@ export class PasswordReset extends LitElement {
   @state() private error = ''
   @state() private notice = ''
   @state() private busy = false
+  // Honeypot: hidden field bots auto-fill; humans never see it.
+  @state() private website = ''
 
   static styles = css`
     :host {
@@ -78,6 +82,17 @@ export class PasswordReset extends LitElement {
       word-break: break-all;
       color: #1e395b;
     }
+
+    /* Honeypot — off-screen, unfocusable, invisible to humans. */
+    .hp-field {
+      position: absolute;
+      left: -9999px;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
   `
 
   private _reset() {
@@ -105,6 +120,10 @@ export class PasswordReset extends LitElement {
     this.confirm = e.detail?.value ?? ''
   }
 
+  private _onWebsite(e: Event) {
+    this.website = (e.target as HTMLInputElement).value ?? ''
+  }
+
   private async _requestCode() {
     if (this.busy) return
     this.error = ''
@@ -115,7 +134,19 @@ export class PasswordReset extends LitElement {
     }
     this.busy = true
     try {
-      const res = await api.forgotPassword(this.email)
+      // Degrade to no proof if the challenge fetch fails — the server 403s
+      // with a clear message when PoW is actually required.
+      let pow: PowProof | null = null
+      try {
+        pow = await makePowProof(() => api.getPowChallenge())
+      } catch {
+        pow = null
+      }
+      const antiBot: AntiBot = {
+        website: this.website.trim() || undefined,
+        pow,
+      }
+      const res = await api.forgotPassword(this.email, antiBot)
       if (res.dev_token) {
         // No SMTP configured — dev/mock mode hands the code back directly.
         this.notice = ''
@@ -174,6 +205,16 @@ export class PasswordReset extends LitElement {
     const requesting = this.step === 'email'
 
     return html`
+      <input
+        class="hp-field"
+        type="text"
+        name="website"
+        tabindex="-1"
+        autocomplete="off"
+        aria-hidden="true"
+        .value="${this.website}"
+        @input="${this._onWebsite}"
+      />
       <div class="form-row">
         <roque-text-field
           label="Account email"

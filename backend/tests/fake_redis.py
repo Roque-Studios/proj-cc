@@ -1,9 +1,10 @@
 """In-memory Redis stand-in for tests (supports TTL expiry, no network).
 
-Duck-types the subset of ``redis.Redis`` the watermark cache uses: ``get``,
-``set(..., ex=)``, ``delete`` and ``ttl``. Entries expire on real wall-clock
-time (``time.monotonic``), so TTL-eviction tests run against real expiry
-semantics without needing a Redis server.
+Duck-types the subset of ``redis.Redis`` the watermark cache and the rate
+limiter use: ``get``, ``set(..., ex=)``, ``set(..., nx=)``, ``delete``,
+``ttl`` and ``incr``. Entries expire on real wall-clock time
+(``time.monotonic``), so TTL-eviction tests run against real expiry semantics
+without needing a Redis server.
 """
 
 from __future__ import annotations
@@ -29,9 +30,29 @@ class FakeRedis:
         item = self._store.get(key)
         return item[0] if item is not None else None
 
-    def set(self, key: str, value: bytes, ex: int | None = None) -> bool:
+    def set(self, key: str, value: bytes, ex: int | None = None, nx: bool = False) -> bool:
+        if nx and key in self._store:
+            return False
         expires_at = time.monotonic() + ex if ex is not None else None
         self._store[key] = (value, expires_at)
+        return True
+
+    def incr(self, key: str) -> int:
+        self._purge()
+        item = self._store.get(key)
+        if item is None:
+            self._store[key] = (b"1", None)
+            return 1
+        value = int(item[0]) + 1
+        self._store[key] = (str(value).encode(), item[1])
+        return value
+
+    def expire(self, key: str, seconds: int) -> bool:
+        self._purge()
+        item = self._store.get(key)
+        if item is None:
+            return False
+        self._store[key] = (item[0], time.monotonic() + seconds)
         return True
 
     def delete(self, key: str) -> int:
