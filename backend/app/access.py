@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from .database import get_db
 from .deps import resolve_authenticated_user
-from .models import Subscription, SubscriptionStatus, User, UserRole
+from .models import BlockedUser, Subscription, SubscriptionStatus, User, UserRole
 
 _FOLLOWER_STATUSES = (SubscriptionStatus.active, SubscriptionStatus.trialing)
 
@@ -67,6 +67,25 @@ def _period_is_current(subscription: Subscription) -> bool:
     if period_end.tzinfo is None:
         period_end = period_end.replace(tzinfo=timezone.utc)  # assume UTC
     return period_end > datetime.now(timezone.utc)
+
+
+def is_blocked(db: Session, creator_id: int, user_id: int) -> bool:
+    """True when the creator has blocked this user.
+
+    The single definition of "blocked" shared by every access gate. A blocked
+    user is demoted from ``follower`` everywhere: the content/media/story
+    gates (they resolve as ``registered``), the DM gate, and the subscribe
+    endpoint (``403``). Idempotent by the unique (creator, user) pair.
+    """
+    return (
+        db.scalar(
+            select(BlockedUser.id).where(
+                BlockedUser.creator_id == creator_id,
+                BlockedUser.user_id == user_id,
+            )
+        )
+        is not None
+    )
 
 
 def is_active_follower(db: Session, subscriber_id: int, creator_id: int) -> bool:
@@ -147,6 +166,11 @@ def resolve_viewer_context(
                     Subscription.status.in_(_FOLLOWER_STATUSES),
                 )
             )
+        # A blocked user is demoted to ``registered`` regardless of their
+        # subscription row: the creator banned them, so follower access
+        # (content, stories, media, engagement, unlocks) stops immediately.
+        if is_real_creator and is_blocked(db, creator_id, user.id):
+            return ViewerContext(level=ViewerAccessLevel.registered, user=user)
         if subscription is not None and _period_is_current(subscription):
             return ViewerContext(
                 level=ViewerAccessLevel.follower,

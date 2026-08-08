@@ -720,6 +720,40 @@ class SubscriberListOut(BaseModel):
     summary: RevenueSummaryOut
 
 
+class BlockUserRequest(BaseModel):
+    """Block (ban) a user from a creator's content."""
+
+    user_id: int
+
+
+class BlockedUserOut(BaseModel):
+    """One user the creator has blocked.
+
+    ``was_subscriber`` is True when the block canceled an active subscription
+    (the UI can explain access was revoked); ``subscription_status`` is the
+    user's subscription row status at block time (useful context, e.g. what
+    they were).
+    """
+
+    id: int
+    user_id: int
+    username: str | None
+    email: str
+    blocked_at: datetime
+    was_subscriber: bool = False
+    subscription_status: str | None = None
+
+
+class BlockedUserListOut(BaseModel):
+    """Paginated list of a creator's blocked users (newest first)."""
+
+    items: list[BlockedUserOut]
+    page: int
+    page_size: int
+    total: int
+    has_more: bool
+
+
 class MessagingSettingsUpdate(BaseModel):
     """Toggle the creator's DM policy: who may start a conversation."""
 

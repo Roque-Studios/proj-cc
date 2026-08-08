@@ -25,6 +25,7 @@ from app.config import settings
 from app.database import Base, get_db
 from app.main import app
 from app.models import (
+    BlockedUser,
     Conversation,
     CreatorGatewayConfig,
     CreatorProfile,
@@ -95,6 +96,7 @@ def _clean_db():
         db.query(Message).delete()  # FK to conversation + user
         db.query(Conversation).delete()  # FK to user
         db.query(Subscription).delete()
+        db.query(BlockedUser).delete()  # FK to user
         db.query(CreatorGatewayConfig).delete()  # FK to user
         db.query(CreatorProfile).delete()
         db.query(User).delete()

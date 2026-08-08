@@ -24,7 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..access import is_active_follower
+from ..access import is_active_follower, is_blocked
 from ..models import (
     Conversation,
     CreatorProfile,
@@ -102,6 +102,13 @@ class MessageService:
                     "You can only send messages to creators"
                 )
             creator, subscriber = recipient, sender
+            # A creator's block always wins: the blocked user can neither start
+            # a new thread nor continue an existing one (the conversation may
+            # still be read — history stays, writing stops).
+            if is_blocked(self.db, creator.id, subscriber.id):
+                raise MessageGateError(
+                    "You have been blocked by this creator"
+                )
             if self._conversation_between(creator.id, subscriber.id) is None:
                 if not is_active_follower(self.db, sender.id, creator.id):
                     raise MessageGateError(

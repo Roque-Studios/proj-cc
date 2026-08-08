@@ -41,7 +41,7 @@ from sqlalchemy.orm import Session
 from starlette.responses import JSONResponse
 
 from .. import realtime
-from ..access import is_active_follower, resolve_viewer_context
+from ..access import is_active_follower, is_blocked, resolve_viewer_context
 from ..config import settings
 from ..database import get_db
 from ..deps import get_current_user
@@ -532,7 +532,12 @@ def messages_status(
     # subscribers need follower + policy (with the existing-thread carve-out).
     can_message = True
     reason = ""
-    if recipient.id == user.id:
+    if user.role != UserRole.creator and recipient_is_creator and is_blocked(
+        db, recipient_id, user.id
+    ):
+        can_message = False
+        reason = "You have been blocked by this creator."
+    elif recipient.id == user.id:
         can_message = False
         reason = "You cannot message yourself."
     elif user.role == UserRole.creator and recipient.role == UserRole.creator:

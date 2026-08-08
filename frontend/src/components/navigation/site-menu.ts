@@ -13,7 +13,9 @@ import type { UserMe } from '../../lib/api'
  *
  * - anonymous visitors → **Sign in** / **Create account** (both land on
  *   `/login`, which has the register flow built in);
- * - signed-in users → **My profile** (`/profile`) and **Sign out**.
+ * - signed-in users → **Messages** (`/chat`), **My profile** (`/profile`),
+ *   **Creator dashboard** (`/admin` — creator accounts only, via
+ *   ``user.is_creator``) and **Sign out**.
  *
  * The drawer closes on item tap, backdrop tap or Esc. Emits `aero-logout`
  * when Sign out is chosen so the host can clear tokens + refresh.
@@ -280,6 +282,16 @@ export class SiteMenu extends LitElement {
                   <roque-icon name="user" size="16"></roque-icon>
                   <span>My profile</span>
                 </div>
+                ${this.user?.is_creator
+                  ? html`<div
+                      class="nav-item"
+                      role="menuitem"
+                      @click="${() => this._go('/admin')}"
+                    >
+                      <roque-icon name="dashboard" size="16"></roque-icon>
+                      <span>Creator dashboard</span>
+                    </div>`
+                  : nothing}
                 <div class="nav-item signout" role="menuitem" @click="${this._signOut}">
                   <roque-icon name="logout" size="16"></roque-icon>
                   <span>Sign out</span>

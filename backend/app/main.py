@@ -11,6 +11,7 @@ from .routers import (
     auth,
     content,
     creator,
+    creator_blocks,
     creator_content,
     creator_subscribers,
     engagement,
@@ -38,6 +39,7 @@ app.include_router(auth.router)
 app.include_router(creator.router)
 app.include_router(creator_content.router)
 app.include_router(creator_subscribers.router)
+app.include_router(creator_blocks.router)
 app.include_router(viewer.router)
 app.include_router(webhooks.router)
 app.include_router(subscriptions.router)

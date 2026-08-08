@@ -735,6 +735,46 @@ class StoryMedia(Base):
         return f"/stories/{self.story_id}/media?media_id={self.id}"
 
 
+class BlockedUser(Base):
+    """A subscriber the creator has blocked (banned).
+
+    One row per (creator, blocked user) — the unique pair means blocking is
+    idempotent and unblocking simply removes the row. A blocked user loses
+    every access to that creator: they are demoted from ``follower`` in the
+    access resolver (feed, media, stories, likes, comments and unlocks all
+    gate on it), DMs to the creator are rejected, and they cannot subscribe
+    (``POST /subscribe`` returns 403 while blocked). Blocking also cancels any
+    active subscription the user holds with the creator (the row is marked
+    ``canceled`` locally — no gateway call, so no charge is reversed; the
+    subscriber keeps their paid period but has no access until unblocked, at
+    which point they can re-subscribe).
+    """
+
+    __tablename__ = "blocked_user"
+    __table_args__ = (
+        UniqueConstraint(
+            "creator_id",
+            "user_id",
+            name="uq_blocked_user_creator_user",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    creator_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class CreatorProfile(Base):
     """Creator profile extension (one-to-one with User).
 

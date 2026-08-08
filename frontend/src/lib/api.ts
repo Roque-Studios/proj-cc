@@ -175,6 +175,26 @@ export interface SubscriberList {
   summary: RevenueSummary
 }
 
+export interface BlockedUser {
+  id: number
+  user_id: number
+  username: string | null
+  email: string
+  blocked_at: string
+  // True when the block canceled an active subscription (access was revoked).
+  was_subscriber: boolean
+  // The subscription status the user had at block time (e.g. "active").
+  subscription_status: string | null
+}
+
+export interface BlockedUserList {
+  items: BlockedUser[]
+  page: number
+  page_size: number
+  total: number
+  has_more: boolean
+}
+
 export interface SocialLink {
   platform: string
   label: string
@@ -545,6 +565,27 @@ export const api = {
     })
     if (status) params.set('status', status)
     return request<SubscriberList>(`/creator/subscribers?${params.toString()}`)
+  },
+
+  // ---- User blocking / banning ----
+
+  getBlockedUsers(page = 1, pageSize = 20): Promise<BlockedUserList> {
+    const params = new URLSearchParams({
+      page: String(page),
+      page_size: String(pageSize),
+    })
+    return request<BlockedUserList>(`/creator/blocked?${params.toString()}`)
+  },
+
+  blockUser(userId: number): Promise<BlockedUser> {
+    return request<BlockedUser>('/creator/blocked', {
+      method: 'POST',
+      body: JSON.stringify({ user_id: userId }),
+    })
+  },
+
+  unblockUser(userId: number): Promise<void> {
+    return request<void>(`/creator/blocked/${userId}`, { method: 'DELETE' })
   },
 
   getCreatorLanding(creatorId: number): Promise<CreatorLanding> {

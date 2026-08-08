@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..access import resolve_viewer_context
+from ..access import is_blocked, resolve_viewer_context
 from ..database import get_db
 from ..deps import get_current_user
 from ..gateways import is_config_complete
@@ -64,6 +64,13 @@ def subscribe(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="You cannot subscribe to yourself",
+        )
+    # A blocked user is rejected up front — before gateway resolution — so the
+    # answer is always the clear 403 (never a confusing "no gateway" 400).
+    if is_blocked(db, creator.id, user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You have been blocked by this creator",
         )
 
     # Resolve the payment gateway: the client may pick one of the creator's

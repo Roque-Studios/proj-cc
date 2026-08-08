@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
 from ..deps import require_creator
-from ..models import Payment, Subscription, SubscriptionStatus, User
+from ..models import BlockedUser, Payment, Subscription, SubscriptionStatus, User
 from ..schemas import RevenueSummaryOut, SubscriberListOut, SubscriberOut
 
 router = APIRouter(prefix="/creator/subscribers", tags=["creator"])
@@ -97,7 +97,8 @@ def list_subscribers(
     ``status`` is one of the subscription statuses (active, trialing,
     incomplete, past_due, canceled, expired). The revenue summary is global to
     the creator (not filtered) — it always equals the sum of completed
-    payments in the ledger.
+    payments in the ledger. Blocked (banned) users are excluded entirely —
+    they live on the Blocked tab, not in the subscriber list.
     """
     if status_filter is not None and status_filter not in _VALID_STATUSES:
         raise HTTPException(
@@ -108,6 +109,13 @@ def list_subscribers(
     filters = [Subscription.creator_id == user.id]
     if status_filter is not None:
         filters.append(Subscription.status == SubscriptionStatus(status_filter))
+    # Blocked (banned) users are managed on the Blocked tab — they never
+    # appear here, not even as canceled rows.
+    blocked_ids = db.scalars(
+        select(BlockedUser.user_id).where(BlockedUser.creator_id == user.id)
+    ).all()
+    if blocked_ids:
+        filters.append(Subscription.subscriber_id.notin_(blocked_ids))
 
     total = (
         db.scalar(
