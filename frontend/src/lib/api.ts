@@ -264,6 +264,30 @@ export interface FeedResponse {
   has_more: boolean
 }
 
+export interface MediaGalleryItem {
+  media_id: number
+  post_id: number
+  media_type: string
+  // The real watermarked url when accessible — null when withheld (locked
+  // paid broadcast, or any non-follower item).
+  media_url: string | null
+  // Blurred public preview — set exactly when media_url is withheld.
+  preview_url: string | null
+  broadcast_price_cents: number | null
+  unlocked: boolean | null
+  post_caption: string | null
+  created_at: string
+}
+
+export interface MediaGallery {
+  teaser: boolean
+  items: MediaGalleryItem[]
+  page: number
+  page_size: number
+  total: number
+  has_more: boolean
+}
+
 export interface StoryMedia {
   id: number
   media_type: string
@@ -588,6 +612,15 @@ export const api = {
       page_size: String(pageSize),
     })
     return request<FeedResponse>(`/creators/${creatorId}/posts?${params.toString()}`)
+  },
+
+  // Flat media gallery of a creator's full content (the MEDIA tab).
+  getCreatorMedia(creatorId: number, page = 1, pageSize = 30): Promise<MediaGallery> {
+    const params = new URLSearchParams({
+      page: String(page),
+      page_size: String(pageSize),
+    })
+    return request<MediaGallery>(`/creators/${creatorId}/media?${params.toString()}`)
   },
 
   // ---- Post engagement (likes + comments) ----

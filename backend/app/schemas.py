@@ -464,6 +464,52 @@ class FeedResponse(BaseModel):
     has_more: bool
 
 
+class MediaGalleryItemOut(BaseModel):
+    """One media file in the flat MEDIA gallery of a creator's content.
+
+    The gallery flattens every post's media into one stream (newest post
+    first) so the UI can render a grid of the creator's full content. Gating
+    mirrors the feed exactly: ``media_url`` is set for followers (and the
+    owner) on free posts and unlocked broadcasts; **locked paid broadcasts**
+    withhold it and instead carry ``preview_url`` (the blurred preview) plus
+    the one-time ``broadcast_price_cents`` and ``unlocked: False``; everyone
+    else (anonymous/registered) gets ``preview_url`` on everything
+    (``teaser=True`` on the page). ``post_caption``/``created_at`` give each
+    tile post context for captions and ordering.
+    """
+
+    media_id: int
+    post_id: int
+    media_type: str
+    # The real watermarked url (auth-gated) when accessible — withheld
+    # (None) for locked paid broadcasts and for every non-follower item.
+    media_url: str | None
+    # The blurred public preview — set exactly when ``media_url`` is withheld.
+    preview_url: str | None = None
+    broadcast_price_cents: int | None = None
+    # None for free posts; True once unlocked (or the owner); False while
+    # the one-time payment is still owed.
+    unlocked: bool | None = None
+    post_caption: str | None = None
+    created_at: datetime
+
+
+class MediaGalleryResponse(BaseModel):
+    """Paginated flat media gallery of a creator's content.
+
+    ``teaser=True`` (non-follower) withholds every media url (all tiles are
+    blurred previews); ``teaser=False`` (active follower/owner) returns real
+    urls except for locked paid broadcasts, which stay blurred with price.
+    """
+
+    teaser: bool
+    items: list[MediaGalleryItemOut]
+    page: int
+    page_size: int
+    total: int
+    has_more: bool
+
+
 class CreatorPostOut(BaseModel):
     """One of the creator's own posts as shown on the content dashboard.
 

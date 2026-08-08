@@ -1,7 +1,7 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 
-import '../components/feed/subscriber-feed.ts'
+import '../components/feed/content-tabs.ts'
 import '../components/layouts/card.ts'
 import '../components/buttons/button.ts'
 import '../components/data/avatar.ts'
@@ -512,10 +512,10 @@ export class SubscriberFeedPage extends LitElement {
           : nothing}
 
         ${isFollower
-          ? html`<roque-subscriber-feed
+          ? html`<roque-content-tabs
               creator-id="${this.creatorId}"
               user-id="${this.me?.id ?? ''}"
-            ></roque-subscriber-feed>`
+            ></roque-content-tabs>`
           : html`<roque-card>
               <div class="prompt">
                 ${isAnonymous

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.34.0] - 2026-08-08
+### Added
+- **Posts / MEDIA tabs on the feed and home pages**: browsing a creator's content is now a two-tab component (`roque-content-tabs` wrapping the shared `roque-tabs`) — **Posts** keeps the existing paginated feed, and **MEDIA** opens a flat gallery of the creator's full content (`roque-media-gallery`), lazily loaded only when the tab is opened. The gallery is a responsive grid of every visible post's media (newest post first, "Load more" pagination) where each tile mirrors the feed's access gating: real watermarked images for followers/owner, **blurred previews with a lock badge + price for locked paid broadcasts** (an Unlock button runs the same hosted-checkout flow), and everything blurred for non-followers with a subscribe note — tapping any tile opens the full-screen viewer
+- New endpoint **`GET /creators/{id}/media`** (paginated flat media stream, same follower/owner gate as the feed — locked broadcasts and non-follower items carry the blurred `preview_url`, real urls are never leaked; hidden posts excluded). Coverage: `backend/tests/test_media_gallery.py` (11 tests — access levels, locked paid broadcasts, owner never locked, flattening order, hidden-post exclusion, pagination, validation)
+
 ## [0.33.0] - 2026-08-08
 ### Added
 - **Likes & comments on posts**: subscribers can now like a creator's post and leave text comments (with a small emoji quick-row in the composer). The feed shows a like button (optimistic heart toggle + live count) and a comments button that opens the post's comment section — lazy-loaded, newest first, paginated with a "show more" button; the viewer's own comments get a delete affordance, and the creator can moderate (delete) any comment on their posts. New tables `post_like` (unique per post+user, idempotent toggle) and `post_comment` (migration `b1c2d3e4f5a6`); new endpoints `POST/DELETE /posts/{id}/like` (return the fresh `like_count`) and `GET/POST /posts/{id}/comments` + `DELETE /posts/{id}/comments/{comment_id}` (404 for unknown/hidden posts, 403 for non-followers — engagement follows the same content gate as the media)

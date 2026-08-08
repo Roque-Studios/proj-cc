@@ -16,8 +16,14 @@ from sqlalchemy.orm import Session, selectinload
 from ..access import ViewerContext, resolve_viewer_access
 from ..database import get_db
 from ..gateways import GATEWAYS
-from ..models import Post, PostComment, PostLike, User, UserRole
-from ..schemas import CheckoutGatewayOut, FeedResponse, build_post_out
+from ..models import Post, PostComment, PostLike, PostMedia, User, UserRole
+from ..schemas import (
+    CheckoutGatewayOut,
+    FeedResponse,
+    MediaGalleryItemOut,
+    MediaGalleryResponse,
+    build_post_out,
+)
 from ..services.broadcasts import BroadcastService
 from ..services.gateways import enabled_configured_gateways
 
@@ -186,6 +192,117 @@ def creator_feed(
     return FeedResponse(
         teaser=teaser,
         posts=items,
+        page=page,
+        page_size=page_size,
+        total=total,
+        has_more=page * page_size < total,
+    )
+
+
+@router.get("/{creator_id}/media", response_model=MediaGalleryResponse)
+def creator_media_gallery(
+    creator_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=30, ge=1, le=60),
+    ctx: ViewerContext = Depends(resolve_viewer_access()),
+    db: Session = Depends(get_db),
+):
+    """The creator's full content as a flat media gallery (the MEDIA tab).
+
+    Flattens every visible post's media into one paginated stream, newest
+    post first, so the UI can render a grid of everything the creator has
+    published. Gating mirrors the feed exactly:
+
+    - **active followers / the owner** get real media urls — except **paid
+      broadcasts they haven't unlocked**, which come back as blurred
+      previews with their one-time price (``unlocked: False``);
+    - **anonymous and registered non-followers** get blurred previews on
+      everything (``teaser: True``) — the same shape the feed shows, so
+      subscribers always see the full content while everyone else sees only
+      the blurred outline.
+
+    Hidden posts (``is_visible=False``) are excluded, matching the feed.
+    """
+    creator = db.get(User, creator_id)
+    if creator is None or creator.role != UserRole.creator or not creator.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Creator not found",
+        )
+
+    # Total media across the creator's visible posts (for pagination).
+    total = (
+        db.scalar(
+            select(func.count())
+            .select_from(PostMedia)
+            .join(Post, PostMedia.post_id == Post.id)
+            .where(
+                Post.creator_id == creator_id,
+                Post.is_visible.is_(True),
+            )
+        )
+        or 0
+    )
+
+    # One row per media file, ordered by post (newest first) then media id.
+    rows = db.execute(
+        select(PostMedia, Post)
+        .join(Post, PostMedia.post_id == Post.id)
+        .where(
+            Post.creator_id == creator_id,
+            Post.is_visible.is_(True),
+        )
+        .order_by(Post.created_at.desc(), Post.id.desc(), PostMedia.id)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+
+    is_owner = ctx.user is not None and ctx.user.id == creator_id
+    unlocked_ids = (
+        BroadcastService(db).unlocked_post_ids(
+            ctx.user.id, [post.id for _, post in rows]
+        )
+        if ctx.user is not None
+        else set()
+    )
+    teaser = not (ctx.is_follower or is_owner)
+
+    items: list[MediaGalleryItemOut] = []
+    for media, post in rows:
+        is_locked = (
+            post.broadcast_price_cents is not None
+            and post.id not in unlocked_ids
+            and not is_owner
+        )
+        # A follower/owner gets the real url on free + unlocked media; every
+        # locked broadcast and every non-follower item gets the blurred
+        # preview instead (never the real bytes).
+        include_real = not is_locked and not teaser
+        items.append(
+            MediaGalleryItemOut(
+                media_id=media.id,
+                post_id=post.id,
+                media_type=media.media_type,
+                media_url=media.media_url if include_real else None,
+                preview_url=(
+                    None
+                    if include_real
+                    else f"/preview/{post.id}/media?media_id={media.id}"
+                ),
+                broadcast_price_cents=post.broadcast_price_cents,
+                unlocked=(
+                    None
+                    if post.broadcast_price_cents is None
+                    else (True if not is_locked else False)
+                ),
+                post_caption=post.caption,
+                created_at=post.created_at,
+            )
+        )
+
+    return MediaGalleryResponse(
+        teaser=teaser,
+        items=items,
         page=page,
         page_size=page_size,
         total=total,

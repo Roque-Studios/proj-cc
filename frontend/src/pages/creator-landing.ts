@@ -11,7 +11,7 @@ import '../components/stories/story-viewer.ts'
 import '../components/navigation/site-menu.ts'
 import '../components/feedback/spinner.ts'
 import '../components/feedback/toast.ts'
-import '../components/feed/subscriber-feed.ts'
+import '../components/feed/content-tabs.ts'
 import { api, ApiError, clearTokens, getAccessToken } from '../lib/api'
 import type { CreatorLanding, Story, UserMe } from '../lib/api'
 
@@ -298,16 +298,10 @@ export class CreatorLandingPage extends LitElement {
       padding: 40px 0;
     }
 
-    /* --- Posts section (everyone sees it; non-followers get blurred teasers) --- */
+    /* --- Posts/MEDIA tabs section (everyone sees it; non-followers get
+       blurred teasers) --- */
     .posts-section {
       margin-top: 18px;
-    }
-
-    .posts-title {
-      margin: 0 0 10px;
-      font-size: 15px;
-      font-weight: 600;
-      color: #1e395b;
     }
 
     /* --- Story tray (green MSN ring = live story) --- */
@@ -650,11 +644,11 @@ export class CreatorLandingPage extends LitElement {
           : nothing}
 
         <section class="posts-section">
-          <h2 class="posts-title">Posts</h2>
           ${this.creatorId !== null
-            ? html`<roque-subscriber-feed
+            ? html`<roque-content-tabs
                 creator-id="${this.creatorId}"
-              ></roque-subscriber-feed>`
+                user-id="${this.me?.id ?? ''}"
+              ></roque-content-tabs>`
             : nothing}
         </section>
       </div>
