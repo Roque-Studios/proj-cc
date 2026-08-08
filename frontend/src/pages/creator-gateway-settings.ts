@@ -48,6 +48,11 @@ export class CreatorGatewaySettings extends LitElement {
   @state() private avatarBusy = false
   @state() private socialForm: Record<string, string> = {}
   @state() private socialBusy = false
+  // Monthly subscription price (the creator's own tier price in cents).
+  @state() private tierPriceCents: number | null = null
+  // Dollars-as-typed in the input (parsed to cents on save).
+  @state() private tierPriceInput = '5.00'
+  @state() private tierPriceBusy = false
 
   static styles = css`
     :host {
@@ -266,6 +271,8 @@ export class CreatorGatewaySettings extends LitElement {
         tiktok: profile.social_links?.tiktok ?? '',
         other: profile.social_links?.other ?? '',
       }
+      this.tierPriceCents = profile.tier_price_cents
+      this.tierPriceInput = ((profile.tier_price_cents ?? 500) / 100).toFixed(2)
     } catch (err) {
       this._handleError(err)
     } finally {
@@ -505,6 +512,38 @@ export class CreatorGatewaySettings extends LitElement {
 
   private _onSocialField(platform: string, value: string) {
     this.socialForm = { ...this.socialForm, [platform]: value }
+  }
+
+  private async _saveTierPrice() {
+    if (this.tierPriceBusy) return
+    // Dollars -> cents, accepting "5", "5.5", "5.99"… but nothing below $1
+    // or above $10,000 (the backend enforces the same bounds).
+    const dollars = Number(this.tierPriceInput)
+    if (!Number.isFinite(dollars) || dollars < 1 || dollars > 10_000) {
+      this.toastHeading = 'Invalid subscription price'
+      this.toast = 'Enter a monthly price between $1.00 and $10,000.00.'
+      this._showToast()
+      return
+    }
+    const cents = Math.round(dollars * 100)
+    this.tierPriceBusy = true
+    this.error = ''
+    try {
+      const updated = await api.updateCreatorProfile({ tier_price_cents: cents })
+      this.tierPriceCents = updated.tier_price_cents
+      this.tierPriceInput = ((updated.tier_price_cents ?? 500) / 100).toFixed(2)
+      this.toastHeading = 'Subscription price saved'
+      this.toast = `New subscribers will be charged $${this.tierPriceInput}/month.`
+      this._showToast()
+    } catch (err) {
+      this._handleError(err)
+    } finally {
+      this.tierPriceBusy = false
+    }
+  }
+
+  private _resetTierPrice() {
+    this.tierPriceInput = ((this.tierPriceCents ?? 500) / 100).toFixed(2)
   }
 
   private async _saveSocialLinks() {
@@ -759,6 +798,58 @@ export class CreatorGatewaySettings extends LitElement {
         </roque-card>
 
         <roque-divider orientation="horizontal" spacing="18"></roque-divider>
+
+        <roque-card heading="Subscription price">
+          <p class="desc">
+            The monthly price subscribers pay to follow you. This replaces the
+            platform default ($${((this.tierPriceCents ?? 500) / 100).toFixed(2)}) and is
+            charged on the hosted checkout — the amount a subscriber agreed to
+            is kept on their subscription for renewals and your revenue report.
+          </p>
+          <div style="display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap">
+            <div style="flex: 1; min-width: 200px; max-width: 260px">
+              <roque-text-field
+                label="Monthly price (USD)"
+                type="number"
+                .value="${this.tierPriceInput}"
+                @aero-input="${(e: CustomEvent) =>
+                  (this.tierPriceInput = e.detail?.value ?? '')}"
+              ></roque-text-field>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center">
+              <roque-button
+                context="submit"
+                buttonId="save-tier-price"
+                ?disabled="${this.tierPriceBusy}"
+                @aero-click="${this._saveTierPrice}"
+                >${this.tierPriceBusy
+                  ? 'Saving…'
+                  : this.tierPriceCents
+                    ? 'Update price'
+                    : 'Set price'}</roque-button
+              >
+              ${this.tierPriceCents
+                ? html`<roque-button
+                    buttonId="reset-tier-price"
+                    context="clear"
+                    ?disabled="${this.tierPriceBusy}"
+                    @aero-click="${this._resetTierPrice}"
+                    >Reset</roque-button
+                  >`
+                : ''}
+            </div>
+          </div>
+          <p class="desc" style="margin-top: 10px">
+            <span style="color: #8a97a5">
+              Note: Stripe and PayPal bill through their gateway plan — for
+              those, configure a matching plan price in the gateway dashboard.
+              Wompi payment links and the mock gateway charge this exact
+              amount.
+            </span>
+          </p>
+        </roque-card>
+
+        <div style="height: 18px"></div>
 
         <div class="grid">
           ${this.settings.map((g) => this._renderGatewayCard(g))}

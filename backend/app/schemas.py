@@ -145,6 +145,9 @@ class CreatorProfileOut(BaseModel):
     # own). Edited from the admin ``Legal`` tab; shown pre-checkout.
     tos_text: str | None = None
     privacy_text: str | None = None
+    # The creator's own monthly subscription price in cents (admin Settings
+    # tab). ``None`` = the platform default ``SUBSCRIPTION_TIER_PRICE_CENTS``.
+    tier_price_cents: int | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -159,6 +162,8 @@ class CreatorProfileUpdate(BaseModel):
     ``None`` clears the whole block; an empty string removes one link.
     ``tos_text`` / ``privacy_text`` set the creator's own legal documents;
     blank values fall back to the platform defaults at read time.
+    ``tier_price_cents`` sets the creator's own monthly subscription price
+    ($1.00 .. $10,000.00); ``None`` restores the platform default.
     """
 
     display_name: str | None = Field(default=None, min_length=1, max_length=100)
@@ -171,6 +176,7 @@ class CreatorProfileUpdate(BaseModel):
     payout_info: dict | None = None
     tos_text: str | None = Field(default=None, max_length=100_000)
     privacy_text: str | None = Field(default=None, max_length=100_000)
+    tier_price_cents: int | None = Field(default=None, ge=100, le=1_000_000)
 
     @field_validator("social_links")
     @classmethod
@@ -229,6 +235,9 @@ class SubscriptionOut(BaseModel):
     external_ref: str | None
     checkout_url: str | None
     cancel_at_period_end: bool
+    # The monthly price (cents) snapshotted at checkout — what the subscriber
+    # agreed to pay. ``None`` on legacy rows = the platform default.
+    tier_price_cents: int | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -277,6 +286,9 @@ class CreatorLandingProfileOut(BaseModel):
     # or the ``app.legal`` defaults). Public — subscribers must read them.
     tos_text: str | None = None
     privacy_text: str | None = None
+    # The creator's monthly subscription price in cents (``None`` = the
+    # platform default) — lets the UI show the real price before checkout.
+    tier_price_cents: int | None = None
 
 
 class ViewerLandingOut(BaseModel):

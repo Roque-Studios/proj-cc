@@ -45,6 +45,19 @@ logger = structlog.get_logger()
 # providers use when creating the subscription.
 _TIER_PERIOD_DAYS = 30
 
+def tier_price_cents_for(profile) -> int:
+    """The effective monthly subscription price for a creator's profile.
+
+    The creator's own ``tier_price_cents`` wins when set; otherwise the
+    platform default ``settings.SUBSCRIPTION_TIER_PRICE_CENTS``. Shared by the
+    subscribe flow (amount + ledger), the checkout status endpoint (display)
+    and the public landing payload.
+    """
+    if profile is not None and profile.tier_price_cents:
+        return profile.tier_price_cents
+    return settings.SUBSCRIPTION_TIER_PRICE_CENTS
+
+
 # Normalized provider status string -> our model status.
 _STATUS_MAP = {
     "active": SubscriptionStatus.active,
@@ -96,6 +109,7 @@ class SubscriptionService:
         *,
         age_confirmed: bool = False,
         tos_accepted_at: datetime | None = None,
+        amount_cents: int | None = None,
     ) -> Subscription:
         """Start a subscription and persist it as a *pending* (incomplete) row.
 
@@ -141,6 +155,10 @@ class SubscriptionService:
             subscriber_email=subscriber.email,
             subscriber_name=subscriber.username,
             customer_ref=customer_ref,
+            # The agreed monthly price (the creator's tier price) — Wompi
+            # payment links charge this exact amount; the amount is also
+            # snapshotted onto the row for the revenue ledger.
+            amount_cents=amount_cents,
             metadata={
                 "subscriber_id": str(subscriber_id),
                 "creator_id": str(creator_id),
@@ -166,6 +184,8 @@ class SubscriptionService:
             if tos_accepted_at is not None:
                 subscription.age_confirmed = age_confirmed
                 subscription.tos_accepted_at = tos_accepted_at
+            if amount_cents is not None:
+                subscription.tier_price_cents = amount_cents
         else:
             subscription = Subscription(
                 subscriber_id=subscriber_id,
@@ -178,6 +198,7 @@ class SubscriptionService:
                 checkout_url=result.checkout_url,
                 age_confirmed=age_confirmed,
                 tos_accepted_at=tos_accepted_at,
+                tier_price_cents=amount_cents,
             )
             self.db.add(subscription)
         self.db.commit()
@@ -419,7 +440,11 @@ class SubscriptionService:
                     creator_id=subscription.creator_id,
                     subscriber_id=subscription.subscriber_id,
                     kind="subscription",
-                    amount_cents=settings.SUBSCRIPTION_TIER_PRICE_CENTS,
+                    # The price snapshot on the row — the amount the subscriber
+                    # actually agreed to pay (legacy rows fall back to the
+                    # settings default).
+                    amount_cents=subscription.tier_price_cents
+                    or settings.SUBSCRIPTION_TIER_PRICE_CENTS,
                     status="completed",
                     payment_provider=event.provider,
                     external_ref=event.external_ref,

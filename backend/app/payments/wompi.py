@@ -155,6 +155,10 @@ class WompiPaymentProvider(PaymentProvider):
             )
         creator_id = intent.metadata.get("creator_id", "?")
         creator_username = intent.metadata.get("creator_username") or creator_id
+        # The subscriber's agreed monthly price (the creator's own tier price),
+        # falling back to this provider's configured default when the intent
+        # carries none (direct service calls in tests / legacy callers).
+        amount_cents = intent.amount_cents or self.tier_price_cents
         configuracion: dict = {
             "urlWebhook": self.webhook_url,
             "notificarTransaccionCliente": True,
@@ -168,7 +172,7 @@ class WompiPaymentProvider(PaymentProvider):
             {
                 "identificadorEnlaceComercio": creator_id,
                 "nombreProducto": f"subscription to {creator_username}",
-                "monto": self.tier_price_cents / 100,
+                "monto": amount_cents / 100,
                 "configuracion": configuracion,
             }
         )

@@ -196,6 +196,9 @@ export interface LandingProfile {
   // The effective legal documents (creator's own or the platform defaults).
   tos_text: string | null
   privacy_text: string | null
+  // The creator's monthly subscription price in cents (null = the platform
+  // default) — lets the checkout show the real price.
+  tier_price_cents: number | null
 }
 
 export interface LandingViewer {
@@ -325,6 +328,9 @@ export interface CreatorProfile {
   // defaults) — edited from the admin Legal tab, shown pre-checkout.
   tos_text: string | null
   privacy_text: string | null
+  // The creator's own monthly subscription price in cents (admin Settings
+  // tab); null = the platform default.
+  tier_price_cents: number | null
   created_at: string
   updated_at: string
 }
@@ -340,6 +346,8 @@ export interface SubscriptionInfo {
   external_ref: string | null
   checkout_url: string | null
   cancel_at_period_end: boolean
+  // The monthly price (cents) snapshotted at checkout.
+  tier_price_cents: number | null
   created_at: string
   updated_at: string
 }
@@ -563,6 +571,7 @@ export const api = {
         | 'social_links'
         | 'tos_text'
         | 'privacy_text'
+        | 'tier_price_cents'
       >
     >,
   ): Promise<CreatorProfile> {

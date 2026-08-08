@@ -279,6 +279,25 @@ def test_wompi_subscribe_uses_configured_price(db_session):
         assert fake_api.links[int(link_id)]["monto"] == 9.0
 
 
+def test_wompi_subscribe_uses_intent_amount_cents(db_session):
+    """A per-subscription price (the creator's own tier price) beats the
+    provider's configured default — the payment link charges the agreed
+    amount and the row snapshots it for the revenue ledger."""
+    fake_api = FakeWompiAPI()
+    provider = _wompi_provider(fake_api, tier_price_cents=500)
+    subscriber, creator = _create_users(db_session)
+    service = SubscriptionService(db_session, provider=provider)
+    subscription = service.create_subscription(
+        subscriber.id,
+        creator.id,
+        plan_id="unused-for-wompi",
+        amount_cents=1299,
+    )
+    db_session.refresh(subscription)
+    assert fake_api.links[int(subscription.external_ref)]["monto"] == 12.99
+    assert subscription.tier_price_cents == 1299
+
+
 def test_wompi_subscribe_uses_configured_redirect_fallback(db_session):
     """Without a per-checkout success url the configured redirect is used."""
     fake_api = FakeWompiAPI()

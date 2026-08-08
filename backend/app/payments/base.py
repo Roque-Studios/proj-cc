@@ -53,6 +53,12 @@ class SubscriptionIntent:
     cancel_url: str | None = None
     # Gateway customer reference (created via ``PaymentProvider.create_customer``).
     customer_ref: str | None = None
+    # The **actual monthly price** in cents the subscriber agreed to (the
+    # creator's own tier price). Providers that charge a direct amount (Wompi
+    # payment links) use this; plan-based providers (Stripe/PayPal) keep their
+    # gateway plan id and ignore it. ``None`` = the provider's configured
+    # default price.
+    amount_cents: int | None = None
     metadata: dict = field(default_factory=dict)
 
 

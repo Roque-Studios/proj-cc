@@ -18,7 +18,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..access import resolve_viewer_context
-from ..config import settings
 from ..database import get_db
 from ..deps import get_current_user
 from ..gateways import is_config_complete
@@ -35,7 +34,7 @@ from ..schemas import (
     SubscriptionOut,
 )
 from ..services.gateways import enabled_configured_gateways, get_gateway_row
-from ..services.subscriptions import SubscriptionService
+from ..services.subscriptions import SubscriptionService, tier_price_cents_for
 
 router = APIRouter(tags=["subscriptions"])
 
@@ -95,6 +94,10 @@ def subscribe(
         cancel_url=payload.cancel_url,
         age_confirmed=payload.age_confirmed,
         tos_accepted_at=datetime.now(timezone.utc),
+        # The creator's own monthly price (or the platform default) — charged
+        # by amount-based gateways and snapshotted onto the row for the
+        # revenue ledger.
+        amount_cents=tier_price_cents_for(creator.creator_profile),
     )
     return SubscribeResponse(
         subscription=SubscriptionOut.model_validate(subscription),
@@ -204,7 +207,9 @@ def subscribe_status(
         subscription=(
             SubscriptionOut.model_validate(subscription) if subscription is not None else None
         ),
-        tier_price_cents=settings.SUBSCRIPTION_TIER_PRICE_CENTS,
+        # The creator's own monthly price — the checkout form displays this
+        # exact amount (falling back to the platform default when unset).
+        tier_price_cents=tier_price_cents_for(creator.creator_profile),
     )
 
 

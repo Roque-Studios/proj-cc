@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.36.0] - 2026-08-08
+### Added
+- **Per-creator subscription price**: creators set their own monthly price from the admin **Settings** tab (new Subscription price card — USD input, client + server validation between $1.00 and $10,000, and a Reset button back to the platform default). The price flows through every surface: the public landing payload, the checkout status endpoint (what the hosted checkout displays), the payment link itself (Wompi `create_subscription` now prices the link from the intent amount), and the revenue ledger — the price is **snapshotted onto the subscription row** at checkout, so renewals and the revenue report always reflect the amount the subscriber agreed to, even if the creator changes the price later. `creator_profile.tier_price_cents` + `subscription.tier_price_cents` (migration `3e4d5f6a7b8c`), with a shared `tier_price_cents_for(profile)` helper (creator price wins, else the `SUBSCRIPTION_TIER_PRICE_CENTS` default)
+- Note surfaced in the admin UI: Stripe and PayPal bill through their gateway plan (configure a matching plan price in the gateway dashboard), while Wompi payment links and the mock gateway charge this exact amount
+- Coverage: `backend/tests/test_tier_price.py` (7 tests — validation bounds, profile set/reset/fallback, subscribe snapshot on create + reactivation, ledger amount on activation, status + landing exposure) + a Wompi provider test that the payment link uses the creator's amount
+
 ## [0.35.0] - 2026-08-08
 ### Added
 - **Age verification + Terms/Privacy consent gate before any payment**: the subscribe checkout now shows a consent panel — a checkbox confirming the subscriber is **18 or older** and a checkbox accepting the **Terms of Service and Privacy Policy** — and the Subscribe button stays disabled until both are checked. `POST /subscribe` enforces the same rule server-side (`accepted_tos` + `age_confirmed` must be true, else 400) and records the consent **audit trail** on the subscription row (`age_confirmed` + `tos_accepted_at`, written in the same transaction as the pending row; re-subscribes refresh it). Migration `2f1e3d4a5b6c`

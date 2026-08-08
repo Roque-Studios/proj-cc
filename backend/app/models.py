@@ -141,6 +141,12 @@ class Subscription(Base):
     # gate.
     age_confirmed = Column(Boolean, default=False, nullable=False, server_default="false")
     tos_accepted_at = Column(DateTime(timezone=True), nullable=True)
+    # The monthly price in cents **snapshotted at checkout** (the creator's
+    # ``tier_price_cents`` or the platform default). NULL on legacy rows =
+    # ``settings.SUBSCRIPTION_TIER_PRICE_CENTS`` at read time. The webhook
+    # reconciler records this exact amount in the revenue ledger, so renewals
+    # stay priced at what the subscriber agreed to pay.
+    tier_price_cents = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -774,6 +780,12 @@ class CreatorProfile(Base):
     # creator can never leave subscribers without a policy.
     tos_text = Column(Text, nullable=True)
     privacy_text = Column(Text, nullable=True)
+    # The creator's own monthly subscription price in cents (set from the admin
+    # Settings tab). NULL/0 = the platform default
+    # ``settings.SUBSCRIPTION_TIER_PRICE_CENTS`` (``$5.00``). The price is
+    # snapshotted onto each subscription row at checkout so renewals and the
+    # revenue ledger keep the price the subscriber actually paid.
+    tier_price_cents = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

@@ -48,6 +48,7 @@ from ..schemas import (
 )
 from ..services.gateways import enabled_configured_gateways
 from ..services.stories import StoryService
+from ..services.subscriptions import tier_price_cents_for
 
 router = APIRouter(prefix="/creators", tags=["public"])
 
@@ -128,6 +129,9 @@ def _landing_payload(
             # pre-checkout and the /legal page renders them.
             tos_text=tos_text,
             privacy_text=privacy_text,
+            # The creator's monthly price (public — the subscribe CTA and
+            # checkout display it).
+            tier_price_cents=tier_price_cents_for(profile),
         ),
         social_links=_social_links(profile) if profile else [],
         viewer=ViewerLandingOut(

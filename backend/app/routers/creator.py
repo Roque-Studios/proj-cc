@@ -107,6 +107,7 @@ def _profile_out(profile: CreatorProfile) -> CreatorProfileOut:
         tos_text=(profile.tos_text or DEFAULT_TOS).strip() or DEFAULT_TOS,
         privacy_text=(profile.privacy_text or DEFAULT_PRIVACY).strip()
         or DEFAULT_PRIVACY,
+        tier_price_cents=profile.tier_price_cents,
         created_at=profile.created_at,
         updated_at=profile.updated_at,
     )
