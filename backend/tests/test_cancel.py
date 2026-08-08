@@ -289,7 +289,11 @@ def test_full_flow_cancel_then_expire(client, db_session):
         db.commit()
 
     # Subscribe via the endpoint (mock provider -> incomplete).
-    resp = client.post("/subscribe", json={"creator_id": creator_id}, headers=headers)
+    resp = client.post(
+        "/subscribe",
+        json={"creator_id": creator_id, "accepted_tos": True, "age_confirmed": True},
+        headers=headers,
+    )
     assert resp.status_code == 201
     external_ref = resp.json()["subscription"]["external_ref"]
 

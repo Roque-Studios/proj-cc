@@ -71,6 +71,21 @@ def subscribe(
     # enabled gateways explicitly; otherwise a single enabled+configured
     # gateway is used (ambiguous/absent -> 400 so the checkout UI can react).
     gateway, provider, plan_id = _resolve_gateway(db, creator.id, payload.provider)
+
+    # Consent gate: the subscriber must confirm they are 18+ and accept the
+    # creator's Terms of Service **before any payment is started** (the hosted
+    # checkout is only created below once consent is verified). The confirmed
+    # state is recorded on the row as the consent audit trail (age_confirmed +
+    # tos_accepted_at), written in the same transaction as the pending row.
+    if not payload.accepted_tos or not payload.age_confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "You must confirm you are 18 or older and accept the Terms of "
+                "Service and Privacy Policy before subscribing."
+            ),
+        )
+
     service = SubscriptionService(db, provider=provider)
     subscription = service.create_subscription(
         subscriber_id=user.id,
@@ -78,6 +93,8 @@ def subscribe(
         plan_id=plan_id,
         success_url=payload.success_url,
         cancel_url=payload.cancel_url,
+        age_confirmed=payload.age_confirmed,
+        tos_accepted_at=datetime.now(timezone.utc),
     )
     return SubscribeResponse(
         subscription=SubscriptionOut.model_validate(subscription),

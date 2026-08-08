@@ -3,6 +3,7 @@ import { customElement, state } from 'lit/decorators.js'
 
 import './creator-login.ts'
 import './creator-gateway-settings.ts'
+import './creator-legal-settings.ts'
 import './creator-content.ts'
 import './creator-subscribers.ts'
 import './chat.ts'
@@ -75,6 +76,12 @@ export class CreatorSettingsApp extends LitElement {
             @aero-logout="${this._onLogout}"
             @aero-unauthorized="${this._onLogout}"
           ></roque-content-manager>
+          <roque-legal-settings
+            slot="panel"
+            label="Legal"
+            @aero-logout="${this._onLogout}"
+            @aero-unauthorized="${this._onLogout}"
+          ></roque-legal-settings>
           <roque-subscribers-manager
             slot="panel"
             label="Subscribers"

@@ -152,7 +152,12 @@ def test_subscribe_uses_explicit_enabled_gateway(client, stub_build):
     sub_headers = _register(client, "sub@example.com")
     resp = client.post(
         "/subscribe",
-        json={"creator_id": creator_id, "provider": "stripe"},
+        json={
+            "creator_id": creator_id,
+            "provider": "stripe",
+            "accepted_tos": True,
+            "age_confirmed": True,
+        },
         headers=sub_headers,
     )
     assert resp.status_code == 201
@@ -197,7 +202,7 @@ def test_subscribe_without_provider_and_none_enabled_400(client, stub_build):
     sub_headers = _register(client, "sub@example.com")
     resp = client.post(
         "/subscribe",
-        json={"creator_id": creator_id},
+        json={"creator_id": creator_id, "accepted_tos": True, "age_confirmed": True},
         headers=sub_headers,
     )
     assert resp.status_code == 400
@@ -242,7 +247,7 @@ def test_subscribe_without_provider_defaults_to_single_enabled(client, stub_buil
     sub_headers = _register(client, "sub@example.com")
     resp = client.post(
         "/subscribe",
-        json={"creator_id": creator_id},
+        json={"creator_id": creator_id, "accepted_tos": True, "age_confirmed": True},
         headers=sub_headers,
     )
     assert resp.status_code == 201

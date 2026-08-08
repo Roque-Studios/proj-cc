@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..database import get_db
 from ..deps import get_current_user, require_creator
+from ..legal import DEFAULT_PRIVACY, DEFAULT_TOS
 from ..media import MediaValidationError, validate_upload
 from ..gateways import (
     CREATOR_GATEWAY_ORDER,
@@ -88,10 +89,33 @@ def apply_creator(user: User = Depends(get_current_user), db: Session = Depends(
     return _get_or_create_profile(db, user)
 
 
+def _profile_out(profile: CreatorProfile) -> CreatorProfileOut:
+    """The public profile shape with the **effective** legal documents.
+
+    ``tos_text`` / ``privacy_text`` fall back to the platform defaults in
+    ``app.legal`` when the creator hasn't set their own (or cleared them), so
+    the admin form and the pre-checkout documents always have content.
+    """
+    return CreatorProfileOut(
+        user_id=profile.user_id,
+        display_name=profile.display_name,
+        bio=profile.bio,
+        avatar_url=profile.avatar_url,
+        banner_url=profile.banner_url,
+        social_links=profile.social_links,
+        payout_info=profile.payout_info,
+        tos_text=(profile.tos_text or DEFAULT_TOS).strip() or DEFAULT_TOS,
+        privacy_text=(profile.privacy_text or DEFAULT_PRIVACY).strip()
+        or DEFAULT_PRIVACY,
+        created_at=profile.created_at,
+        updated_at=profile.updated_at,
+    )
+
+
 @router.get("/profile", response_model=CreatorProfileOut)
 def get_profile(user: User = Depends(require_creator), db: Session = Depends(get_db)):
     """Creator-only: fetch (or lazily create) the creator profile."""
-    return _get_or_create_profile(db, user)
+    return _profile_out(_get_or_create_profile(db, user))
 
 
 @router.put("/profile", response_model=CreatorProfileOut)
@@ -100,13 +124,14 @@ def update_profile(
     user: User = Depends(require_creator),
     db: Session = Depends(get_db),
 ):
-    """Creator-only: update display name, bio, avatar and payout info."""
+    """Creator-only: update display name, bio, avatar, payout info and the
+    legal documents (``tos_text`` / ``privacy_text``)."""
     profile = _get_or_create_profile(db, user)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(profile, field, value)
     db.commit()
     db.refresh(profile)
-    return profile
+    return _profile_out(profile)
 
 
 # --------------------------------------------------------------------------- #
@@ -208,7 +233,7 @@ def upload_banner(
     db: Session = Depends(get_db),
 ):
     """Creator-only: upload the public hero banner for the landing page."""
-    return _store_profile_image(file, user, db, kind="banner")
+    return _profile_out(_store_profile_image(file, user, db, kind="banner"))
 
 
 @router.delete("/banner", response_model=CreatorProfileOut)
@@ -219,7 +244,7 @@ def delete_banner(
     """Creator-only: remove the hero banner (falls back to the default gradient)."""
     profile = _get_or_create_profile(db, user)
     _clear_profile_image(profile, db, kind="banner")
-    return profile
+    return _profile_out(profile)
 
 
 @router.post("/avatar", response_model=CreatorProfileOut)
@@ -229,7 +254,7 @@ def upload_avatar(
     db: Session = Depends(get_db),
 ):
     """Creator-only: upload the public profile avatar (landing hero)."""
-    return _store_profile_image(file, user, db, kind="avatar")
+    return _profile_out(_store_profile_image(file, user, db, kind="avatar"))
 
 
 @router.delete("/avatar", response_model=CreatorProfileOut)
@@ -240,7 +265,7 @@ def delete_avatar(
     """Creator-only: remove the avatar (falls back to the initial letter)."""
     profile = _get_or_create_profile(db, user)
     _clear_profile_image(profile, db, kind="avatar")
-    return profile
+    return _profile_out(profile)
 
 
 # --------------------------------------------------------------------------- #

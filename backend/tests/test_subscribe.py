@@ -65,13 +65,20 @@ def test_subscribe_requires_auth(client, db_session):
     with db_session as db:
         creator = _make_creator(db)
         creator_id = creator.id
-    resp = client.post("/subscribe", json={"creator_id": creator_id})
+    resp = client.post(
+        "/subscribe",
+        json={"creator_id": creator_id, "accepted_tos": True, "age_confirmed": True},
+    )
     assert resp.status_code == 401
 
 
 def test_subscribe_unknown_creator_404(client, db_session):
     headers = _register(client, "sub@example.com")
-    resp = client.post("/subscribe", json={"creator_id": 999999}, headers=headers)
+    resp = client.post(
+        "/subscribe",
+        json={"creator_id": 999999, "accepted_tos": True, "age_confirmed": True},
+        headers=headers,
+    )
     assert resp.status_code == 404
 
 
@@ -89,7 +96,11 @@ def test_subscribe_to_non_creator_404(client, db_session):
         db.commit()
         db.refresh(plain)
         plain_id = plain.id
-    resp = client.post("/subscribe", json={"creator_id": plain_id}, headers=headers)
+    resp = client.post(
+        "/subscribe",
+        json={"creator_id": plain_id, "accepted_tos": True, "age_confirmed": True},
+        headers=headers,
+    )
     assert resp.status_code == 404
 
 
@@ -100,7 +111,11 @@ def test_subscribe_to_self_400(client, db_session):
         user.role = UserRole.creator
         db.commit()
         user_id = user.id
-    resp = client.post("/subscribe", json={"creator_id": user_id}, headers=headers)
+    resp = client.post(
+        "/subscribe",
+        json={"creator_id": user_id, "accepted_tos": True, "age_confirmed": True},
+        headers=headers,
+    )
     assert resp.status_code == 400
 
 
@@ -114,7 +129,11 @@ def test_subscribe_creates_incomplete_subscription_with_checkout_url(client, db_
         creator = _make_creator(db)
         creator_id = creator.id
 
-    resp = client.post("/subscribe", json={"creator_id": creator_id}, headers=headers)
+    resp = client.post(
+        "/subscribe",
+        json={"creator_id": creator_id, "accepted_tos": True, "age_confirmed": True},
+        headers=headers,
+    )
     assert resp.status_code == 201
     body = resp.json()
     assert body["status"] == "incomplete"
@@ -132,8 +151,16 @@ def test_subscribe_is_idempotent_while_pending(client, db_session):
         creator = _make_creator(db)
         creator_id = creator.id
 
-    first = client.post("/subscribe", json={"creator_id": creator_id}, headers=headers)
-    second = client.post("/subscribe", json={"creator_id": creator_id}, headers=headers)
+    first = client.post(
+        "/subscribe",
+        json={"creator_id": creator_id, "accepted_tos": True, "age_confirmed": True},
+        headers=headers,
+    )
+    second = client.post(
+        "/subscribe",
+        json={"creator_id": creator_id, "accepted_tos": True, "age_confirmed": True},
+        headers=headers,
+    )
     assert first.status_code == 201
     assert second.status_code == 201
     assert first.json()["subscription"]["id"] == second.json()["subscription"]["id"]
@@ -150,7 +177,11 @@ def test_subscribe_then_payment_success_activates(client, db_session):
         creator = _make_creator(db)
         creator_id = creator.id
 
-    resp = client.post("/subscribe", json={"creator_id": creator_id}, headers=headers)
+    resp = client.post(
+        "/subscribe",
+        json={"creator_id": creator_id, "accepted_tos": True, "age_confirmed": True},
+        headers=headers,
+    )
     assert resp.status_code == 201
     external_ref = resp.json()["subscription"]["external_ref"]
 
@@ -174,7 +205,11 @@ def test_subscribe_then_payment_failure_stays_incomplete(client, db_session):
         creator = _make_creator(db)
         creator_id = creator.id
 
-    resp = client.post("/subscribe", json={"creator_id": creator_id}, headers=headers)
+    resp = client.post(
+        "/subscribe",
+        json={"creator_id": creator_id, "accepted_tos": True, "age_confirmed": True},
+        headers=headers,
+    )
     assert resp.status_code == 201
     external_ref = resp.json()["subscription"]["external_ref"]
 

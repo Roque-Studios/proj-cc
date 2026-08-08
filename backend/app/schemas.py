@@ -140,6 +140,11 @@ class CreatorProfileOut(BaseModel):
     banner_url: str | None
     social_links: dict[str, str] | None
     payout_info: dict | None
+    # The creator's Terms of Service / Privacy Policy texts (effective — the
+    # platform defaults from ``app.legal`` when the creator hasn't set their
+    # own). Edited from the admin ``Legal`` tab; shown pre-checkout.
+    tos_text: str | None = None
+    privacy_text: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -152,6 +157,8 @@ class CreatorProfileUpdate(BaseModel):
     ``social_links`` is a dict of platform -> handle/url (``twitter``,
     ``instagram``, ``tiktok``, ``other``); unknown platforms are rejected.
     ``None`` clears the whole block; an empty string removes one link.
+    ``tos_text`` / ``privacy_text`` set the creator's own legal documents;
+    blank values fall back to the platform defaults at read time.
     """
 
     display_name: str | None = Field(default=None, min_length=1, max_length=100)
@@ -162,6 +169,8 @@ class CreatorProfileUpdate(BaseModel):
     banner_url: str | None = Field(default=None, max_length=500)
     social_links: dict[str, str] | None = None
     payout_info: dict | None = None
+    tos_text: str | None = Field(default=None, max_length=100_000)
+    privacy_text: str | None = Field(default=None, max_length=100_000)
 
     @field_validator("social_links")
     @classmethod
@@ -186,12 +195,21 @@ class SubscribeRequest(BaseModel):
     ``provider`` optionally picks which of the creator's enabled gateways to
     pay with (stripe/paypal/wompi/mock); when omitted, a single enabled +
     configured gateway is used (multiple or none -> 400).
+
+    ``accepted_tos`` / ``age_confirmed`` are the **consent gate**: the
+    subscriber must confirm they are 18+ and accept the creator's Terms of
+    Service before any payment is started (``POST /subscribe`` rejects
+    otherwise). The confirmed state is recorded on the subscription row as the
+    consent audit trail.
     """
 
     creator_id: int
     provider: str | None = Field(default=None, max_length=50)
     success_url: str | None = None
     cancel_url: str | None = None
+    # Consent flags — both must be True for the subscription to start.
+    accepted_tos: bool = False
+    age_confirmed: bool = False
 
 
 class CancelRequest(BaseModel):
@@ -255,6 +273,10 @@ class CreatorLandingProfileOut(BaseModel):
     # avatar indicator green on the landing/feed pages. Public: the story
     # *content* stays follower-only, the badge is just the signal.
     has_active_story: bool = False
+    # The effective legal documents shown pre-checkout (the creator's own text
+    # or the ``app.legal`` defaults). Public — subscribers must read them.
+    tos_text: str | None = None
+    privacy_text: str | None = None
 
 
 class ViewerLandingOut(BaseModel):

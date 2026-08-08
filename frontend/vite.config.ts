@@ -53,6 +53,7 @@ export default defineConfig({
         checkout: fileURLToPath(new URL('./checkout.html', import.meta.url)),
         chat: fileURLToPath(new URL('./chat.html', import.meta.url)),
         profile: fileURLToPath(new URL('./profile.html', import.meta.url)),
+        legal: fileURLToPath(new URL('./legal.html', import.meta.url)),
       },
     },
   },

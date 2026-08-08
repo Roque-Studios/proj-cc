@@ -93,6 +93,9 @@ class SubscriptionService:
         plan_id: str,
         success_url: str | None = None,
         cancel_url: str | None = None,
+        *,
+        age_confirmed: bool = False,
+        tos_accepted_at: datetime | None = None,
     ) -> Subscription:
         """Start a subscription and persist it as a *pending* (incomplete) row.
 
@@ -123,6 +126,10 @@ class SubscriptionService:
         if existing is not None and existing.status in _PENDING_OR_ACTIVE:
             return existing
 
+        # The consent audit trail: capture the subscriber's 18+ confirmation
+        # and Terms-of-Service acceptance at creation/reactivation time (the
+        # router enforces the gate; the service just records what was
+        # confirmed). An already-pending/active row keeps its original consent.
         subscriber = self.db.get(User, subscriber_id)
         if subscriber is None:
             raise ValueError(f"Unknown subscriber: {subscriber_id}")
@@ -156,6 +163,9 @@ class SubscriptionService:
             subscription.payment_provider = self.provider.name
             subscription.external_ref = result.external_ref
             subscription.checkout_url = result.checkout_url
+            if tos_accepted_at is not None:
+                subscription.age_confirmed = age_confirmed
+                subscription.tos_accepted_at = tos_accepted_at
         else:
             subscription = Subscription(
                 subscriber_id=subscriber_id,
@@ -166,6 +176,8 @@ class SubscriptionService:
                 payment_provider=self.provider.name,
                 external_ref=result.external_ref,
                 checkout_url=result.checkout_url,
+                age_confirmed=age_confirmed,
+                tos_accepted_at=tos_accepted_at,
             )
             self.db.add(subscription)
         self.db.commit()

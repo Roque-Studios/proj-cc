@@ -37,6 +37,7 @@ from ..access import (
 )
 from ..database import get_db
 from ..gateways import GATEWAYS
+from ..legal import DEFAULT_PRIVACY, DEFAULT_TOS
 from ..models import Post, User, UserRole
 from ..schemas import (
     CheckoutGatewayOut,
@@ -96,6 +97,20 @@ def _landing_payload(
         or 0
     )
 
+    # The effective legal documents — the creator's own text, falling back to
+    # the ``app.legal`` platform defaults when unset/blank (a creator can never
+    # leave subscribers without a policy).
+    tos_text = (
+        (profile.tos_text or DEFAULT_TOS).strip() or DEFAULT_TOS
+        if profile
+        else DEFAULT_TOS
+    )
+    privacy_text = (
+        (profile.privacy_text or DEFAULT_PRIVACY).strip() or DEFAULT_PRIVACY
+        if profile
+        else DEFAULT_PRIVACY
+    )
+
     return CreatorLandingOut(
         profile=CreatorLandingProfileOut(
             id=creator.id,
@@ -109,6 +124,10 @@ def _landing_payload(
             # avatar indicator green. The story *content* stays follower-only;
             # the badge itself is public (like an online presence dot).
             has_active_story=StoryService(db).has_active_story(creator.id),
+            # The effective legal documents — public, subscribers read them
+            # pre-checkout and the /legal page renders them.
+            tos_text=tos_text,
+            privacy_text=privacy_text,
         ),
         social_links=_social_links(profile) if profile else [],
         viewer=ViewerLandingOut(

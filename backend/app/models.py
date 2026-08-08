@@ -134,6 +134,13 @@ class Subscription(Base):
     # active (access persists) until current_period_end, then a scheduled task
     # flips the status to canceled.
     cancel_at_period_end = Column(Boolean, default=False, nullable=False, server_default="false")
+    # Consent record captured at checkout: the subscriber confirmed they are
+    # 18+ (``age_confirmed``) and accepted the creator's Terms of Service
+    # (``tos_accepted_at`` stamped at creation). Written in the same
+    # transaction as the pending row — the consent audit trail for the checkout
+    # gate.
+    age_confirmed = Column(Boolean, default=False, nullable=False, server_default="false")
+    tos_accepted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -761,6 +768,12 @@ class CreatorProfile(Base):
     allow_messages_from_all_followers = Column(
         Boolean, default=False, nullable=False, server_default="false"
     )
+    # The creator's Terms of Service and Privacy Policy texts shown to
+    # subscribers before checkout (the admin ``Legal`` tab edits them). NULL or
+    # blank = the platform defaults in ``app.legal`` are served instead, so a
+    # creator can never leave subscribers without a policy.
+    tos_text = Column(Text, nullable=True)
+    privacy_text = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

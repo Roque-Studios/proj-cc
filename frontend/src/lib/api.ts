@@ -193,6 +193,9 @@ export interface LandingProfile {
   // avatar indicator green (MSN-online style). Public signal; the story
   // *content* stays follower-only.
   has_active_story?: boolean
+  // The effective legal documents (creator's own or the platform defaults).
+  tos_text: string | null
+  privacy_text: string | null
 }
 
 export interface LandingViewer {
@@ -318,6 +321,10 @@ export interface CreatorProfile {
   banner_url: string | null
   social_links: Record<string, string> | null
   payout_info: Record<string, unknown> | null
+  // The effective legal documents (creator's own text or the platform
+  // defaults) — edited from the admin Legal tab, shown pre-checkout.
+  tos_text: string | null
+  privacy_text: string | null
   created_at: string
   updated_at: string
 }
@@ -547,7 +554,16 @@ export const api = {
 
   updateCreatorProfile(
     payload: Partial<
-      Pick<CreatorProfile, 'display_name' | 'bio' | 'avatar_url' | 'banner_url' | 'social_links'>
+      Pick<
+        CreatorProfile,
+        | 'display_name'
+        | 'bio'
+        | 'avatar_url'
+        | 'banner_url'
+        | 'social_links'
+        | 'tos_text'
+        | 'privacy_text'
+      >
     >,
   ): Promise<CreatorProfile> {
     return request<CreatorProfile>('/creator/profile', {
@@ -659,6 +675,8 @@ export const api = {
     provider?: string,
     successUrl?: string,
     cancelUrl?: string,
+    acceptedTos = false,
+    ageConfirmed = false,
   ): Promise<SubscribeResult> {
     return request<SubscribeResult>('/subscribe', {
       method: 'POST',
@@ -669,6 +687,10 @@ export const api = {
         // (Wompi payment links use this as their urlRedirect).
         success_url: successUrl ?? null,
         cancel_url: cancelUrl ?? null,
+        // Consent gate — both must be confirmed before any payment starts
+        // (the backend rejects otherwise).
+        accepted_tos: acceptedTos,
+        age_confirmed: ageConfirmed,
       }),
     })
   },

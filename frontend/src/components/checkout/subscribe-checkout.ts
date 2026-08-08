@@ -3,6 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js'
 
 import '../layouts/card.ts'
 import '../inputs/radio.ts'
+import '../inputs/checkbox.ts'
 import '../data/badge.ts'
 import '../buttons/button.ts'
 import '../media/icon.ts'
@@ -48,6 +49,9 @@ export class SubscribeCheckout extends LitElement {
   @state() private loading = true
   @state() private subscribing = false
   @state() private error = ''
+  /** Consent gate: the subscriber must confirm 18+ and accept the legal docs. */
+  @state() private ageConfirmed = false
+  @state() private acceptedTos = false
   @state() private toastMessage = ''
   @state() private toastHeading = ''
   @state() private toastType: 'info' | 'error' = 'info'
@@ -144,6 +148,66 @@ export class SubscribeCheckout extends LitElement {
       margin-top: 16px;
       padding-top: 14px;
       border-top: 1px solid #dcdcdc;
+    }
+
+    /* --- Consent panel (age verification + legal acceptance) --- */
+    .consent-panel {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border: 1px solid #c8d2dc;
+      border-radius: 4px;
+      background: linear-gradient(
+        to bottom,
+        rgba(255, 255, 255, 0.85),
+        rgba(173, 216, 230, 0.14)
+      );
+    }
+
+    .consent-title {
+      margin: 0 0 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #1e395b;
+    }
+
+    .consent-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 4px 0;
+    }
+
+    .consent-row roque-checkbox {
+      margin-top: 1px;
+      flex-shrink: 0;
+    }
+
+    .consent-label {
+      font-size: 12px;
+      color: #333;
+      line-height: 1.45;
+    }
+
+    .consent-label a {
+      color: #1e5f9e;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+
+    .consent-label a:hover {
+      color: #3c7fb1;
+    }
+
+    .consent-hint {
+      margin: 8px 0 0;
+      font-size: 11px;
+      color: #8a97a5;
+    }
+
+    .consent-warn {
+      margin: 10px 0 0;
+      font-size: 12px;
+      color: #b04a1f;
     }
 
     .status-panel {
@@ -336,6 +400,13 @@ export class SubscribeCheckout extends LitElement {
 
   private async _subscribe() {
     if (this.subscribing || this.creatorId === 0 || !this.selected) return
+    // Consent gate: never start a payment without the 18+ confirmation and
+    // the Terms acceptance (the backend enforces the same rule).
+    if (!this.ageConfirmed || !this.acceptedTos) {
+      this.error =
+        'Please confirm you are 18 or older and accept the Terms of Service and Privacy Policy to continue.'
+      return
+    }
     this.subscribing = true
     this.error = ''
     try {
@@ -346,6 +417,8 @@ export class SubscribeCheckout extends LitElement {
         // page after paying — the return path reconciles via polling.
         window.location.href,
         window.location.href,
+        this.acceptedTos,
+        this.ageConfirmed,
       )
       this.status = {
         viewer_level: 'registered',
@@ -498,6 +571,10 @@ export class SubscribeCheckout extends LitElement {
     `
   }
 
+  private _legalUrl(tab: 'tos' | 'privacy' = 'tos'): string {
+    return `/legal?creator_id=${this.creatorId}&tab=${tab}`
+  }
+
   private _renderGatewayForm(displayName: string) {
     return html`
       <roque-card heading="Subscribe to ${displayName}">
@@ -531,6 +608,44 @@ export class SubscribeCheckout extends LitElement {
             )}
           </div>
 
+          <div class="consent-panel">
+            <p class="consent-title">Before you pay — one-time confirmation</p>
+            <div class="consent-row">
+              <roque-checkbox
+                .checked="${this.ageConfirmed}"
+                @aero-change="${(e: CustomEvent) =>
+                  (this.ageConfirmed = e.detail?.checked ?? false)}"
+              ></roque-checkbox>
+              <span class="consent-label">
+                I confirm I am <b>18 years of age or older</b> and legally able
+                to purchase digital content.
+              </span>
+            </div>
+            <div class="consent-row">
+              <roque-checkbox
+                .checked="${this.acceptedTos}"
+                @aero-change="${(e: CustomEvent) =>
+                  (this.acceptedTos = e.detail?.checked ?? false)}"
+              ></roque-checkbox>
+              <span class="consent-label">
+                I have read and agree to the
+                <a href="${this._legalUrl('tos')}" target="_blank" rel="noopener">Terms of Service</a>
+                and
+                <a href="${this._legalUrl('privacy')}" target="_blank" rel="noopener">Privacy Policy</a>.
+              </span>
+            </div>
+            <p class="consent-hint">
+              Content may be generated with the assistance of artificial
+              intelligence. You are purchasing a personal, non-transferable
+              license — not ownership.
+            </p>
+            ${!this.ageConfirmed || !this.acceptedTos
+              ? html`<p class="consent-warn">
+                  Please confirm both boxes above to enable payment.
+                </p>`
+              : nothing}
+          </div>
+
           ${this.error
             ? html`<div class="error-box">${this.error}</div>`
             : nothing}
@@ -539,6 +654,9 @@ export class SubscribeCheckout extends LitElement {
             <span class="resume-note">You'll be redirected to ${this.selected ?? 'the gateway'} to complete payment.</span>
             <roque-button
               buttonId="checkout-submit"
+              ?disabled="${this.subscribing ||
+                !this.ageConfirmed ||
+                !this.acceptedTos}"
               @aero-click="${this._subscribe}"
               >${this.subscribing ? 'Opening checkout…' : 'Subscribe'}</roque-button
             >
