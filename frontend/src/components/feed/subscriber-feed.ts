@@ -434,7 +434,18 @@ export class SubscriberFeed extends LitElement {
     if (this.unlocking.has(post.id)) return
     this.unlocking = new Set(this.unlocking).add(post.id)
     try {
-      await api.unlockBroadcast(post.id)
+      const res = await api.unlockBroadcast(post.id, {
+        success_url: window.location.href,
+        cancel_url: window.location.href,
+      })
+      if (res.checkout_url) {
+        // Hosted checkout: the subscriber pays on the gateway's page; the
+        // payment webhook activates the unlock and the gateway returns them
+        // here, where the reloaded feed shows the broadcast unlocked.
+        window.location.assign(res.checkout_url)
+        return
+      }
+      // Already unlocked (e.g. paid on a previous visit): refresh in place.
       this._toast('info', 'Unlocked! Enjoy the full broadcast.', 'Broadcast unlocked')
       // The unlock response carries no media urls; refetch the feed's first
       // page (newest posts) and swap in the fresh post object wholesale — it

@@ -5,8 +5,11 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..gateways import CREATOR_GATEWAY_ORDER, is_config_complete
 from ..models import CreatorGatewayConfig
+from ..payments import PaymentProvider, get_payment_provider
+from ..payments.factory import build_provider_from_config
 
 
 def gateway_rows(db: Session, creator_id: int) -> dict[str, CreatorGatewayConfig]:
@@ -47,3 +50,19 @@ def enabled_configured_gateways(
         and row.enabled
         and is_config_complete(gateway, row.config)
     ]
+
+
+def resolve_unlock_provider(db: Session, creator_id: int) -> PaymentProvider:
+    """The provider used to create a creator's one-time unlock checkouts.
+
+    Prefers the creator's **single** enabled+configured gateway (the same
+    account + webhook secret the subscription checkout uses, so payment
+    events reconcile); when the creator has none (or several — ambiguous),
+    falls back to the platform env provider so the zero-config mock/dev path
+    keeps working.
+    """
+    enabled = enabled_configured_gateways(db, creator_id)
+    if len(enabled) == 1:
+        gateway, row = enabled[0]
+        return build_provider_from_config(gateway, row.config)
+    return get_payment_provider(settings)

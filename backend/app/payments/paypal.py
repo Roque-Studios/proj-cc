@@ -17,6 +17,7 @@ import httpx
 from .base import (
     ChargeRequest,
     ChargeResult,
+    PaymentLinkResult,
     PaymentProvider,
     PaymentProviderError,
     ProviderConfigurationError,
@@ -329,6 +330,46 @@ class PayPalPaymentProvider(PaymentProvider):
             period_end=period_end,
             metadata=metadata,
             raw=payload,
+        )
+
+    def create_one_time_link(self, request: ChargeRequest) -> PaymentLinkResult:
+        """Create a hosted PayPal order (approve link) for a one-time payment.
+
+        The customer approves + pays on PayPal's hosted page; the capture
+        webhook (``PAYMENT.CAPTURE.COMPLETED``) activates the unlock.
+        """
+        body = {
+            "intent": "CAPTURE",
+            "application_context": {
+                "brand_name": "Content Creator Engine",
+                "user_action": "PAY_NOW",
+                "return_url": request.success_url or "https://example.com/success",
+                "cancel_url": request.cancel_url or "https://example.com/cancel",
+            },
+            "purchase_units": [
+                {
+                    "amount": {
+                        "currency_code": request.currency,
+                        "value": f"{request.amount_cents / 100:.2f}",
+                    },
+                    "description": request.description or "",
+                    "custom_id": json.dumps(request.metadata),
+                }
+            ],
+        }
+        resp = self._client.post(
+            "/v2/checkout/orders", headers=self._auth_headers(), json=body
+        )
+        self._raise_for_status(resp)
+        order = resp.json()
+        checkout_url = None
+        for link in order.get("links", []):
+            if link.get("rel") == "approve":
+                checkout_url = link.get("href")
+        return PaymentLinkResult(
+            external_ref=order["id"],
+            checkout_url=checkout_url,
+            raw=order,
         )
 
     def charge_one_time(self, request: ChargeRequest) -> ChargeResult:

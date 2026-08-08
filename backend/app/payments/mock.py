@@ -20,6 +20,7 @@ from typing import Mapping
 from .base import (
     ChargeRequest,
     ChargeResult,
+    PaymentLinkResult,
     PaymentProvider,
     SubscriptionIntent,
     SubscriptionResult,
@@ -51,6 +52,7 @@ class MockPaymentProvider(PaymentProvider):
         self.webhook_secret = webhook_secret
         self.subscriptions: dict[str, dict] = {}
         self.charges: dict[str, dict] = {}
+        self.one_time_links: dict[str, dict] = {}
         self._seq = 0
 
     # ------------------------------------------------------------------ #
@@ -132,6 +134,28 @@ class MockPaymentProvider(PaymentProvider):
             subscription_status=payload.get("subscription_status"),
             metadata=payload.get("metadata", {}),
             raw=payload,
+        )
+
+    def create_one_time_link(self, request: ChargeRequest) -> PaymentLinkResult:
+        """Create a hosted one-time payment link.
+
+        The mock never charges synchronously — tests simulate the hosted
+        payment by posting a signed ``payment.succeeded`` webhook for the link
+        ref (exactly like a real gateway's completion event), which activates
+        the unlock through the normal webhook path.
+        """
+        self._seq += 1
+        external_ref = f"ch_mock_{self._seq}_{uuid.uuid4().hex[:8]}"
+        self.one_time_links[external_ref] = {
+            "external_ref": external_ref,
+            "amount_cents": request.amount_cents,
+            "currency": request.currency,
+            "metadata": request.metadata,
+        }
+        return PaymentLinkResult(
+            external_ref=external_ref,
+            checkout_url=f"https://mock.checkout/{external_ref}",
+            raw=dict(self.one_time_links[external_ref]),
         )
 
     def charge_one_time(self, request: ChargeRequest) -> ChargeResult:

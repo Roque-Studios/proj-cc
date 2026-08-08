@@ -20,6 +20,7 @@ from app.config import settings
 from app.models import Subscription, SubscriptionStatus, User, UserRole
 from app.payments import (
     ChargeRequest,
+    PaymentLinkResult,
     PaymentProvider,
     ProviderConfigurationError,
     SubscriptionIntent,
@@ -150,6 +151,14 @@ class FakePaymentProvider(PaymentProvider):
             status="succeeded",
             amount_cents=request.amount_cents,
             currency=request.currency,
+        )
+
+    def create_one_time_link(self, request) -> PaymentLinkResult:
+        self.calls.append(("create_one_time_link", (), request.__dict__))
+        return PaymentLinkResult(
+            external_ref="fake_link_1",
+            checkout_url="https://fake.checkout/link/1",
+            raw={},
         )
 
 

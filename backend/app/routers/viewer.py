@@ -90,7 +90,11 @@ def creator_feed(
         .limit(page_size)
     ).all()
 
-    if ctx.is_follower:
+    # Followers see the full feed; the creator viewing their **own** feed is
+    # treated the same — their paid broadcasts are never locked for them (the
+    # owner always has full access, matching the media + unlock endpoints).
+    is_owner = ctx.user is not None and ctx.user.id == creator_id
+    if ctx.is_follower or is_owner:
         unlocked_ids = (
             BroadcastService(db).unlocked_post_ids(ctx.user.id, [p.id for p in posts])
             if ctx.user is not None
@@ -101,6 +105,7 @@ def creator_feed(
             is_locked = (
                 post.broadcast_price_cents is not None
                 and post.id not in unlocked_ids
+                and not is_owner
             )
             items.append(
                 build_post_out(

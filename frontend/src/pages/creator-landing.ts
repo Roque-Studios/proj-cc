@@ -501,6 +501,19 @@ export class CreatorLandingPage extends LitElement {
                           Subscriber 🎉 — welcome back${viewer.username ? `, ${viewer.username}` : ''}
                         </span>
                         <p class="cta-sub">Full posts below — enjoy the feed.</p>
+                        <roque-button
+                          buttonId="landing-message"
+                          @aero-click="${() =>
+                            (window.location.href =
+                              '/chat?recipient=' +
+                              this.creatorId +
+                              '&name=' +
+                              encodeURIComponent(displayName) +
+                              '&avatar=' +
+                              encodeURIComponent(profile.avatar_url || ''))}"
+                          ><roque-icon name="chat" size="14" style="margin-right:6px"></roque-icon
+                          >Message</roque-button
+                        >
                       `
                     : html`
                         <p class="cta-sub">Unlock the full feed for one monthly price.</p>

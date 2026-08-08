@@ -126,6 +126,43 @@ def notify_payment_failed(subscription_id: int) -> bool:
         db.close()
 
 
+@celery_app.task(name="tasks.notify_password_reset")
+def notify_password_reset(email: str, reset_token: str) -> bool:
+    """Email a user their password-reset code.
+
+    Enqueued by ``POST /auth/forgot-password`` when SMTP is configured; the
+    request itself never waits on mail. When SMTP is not configured the task
+    degrades to a structured log (the endpoint then hands the code back as
+    ``dev_token`` so the flow still works in dev).
+    """
+    subject = "Your password reset code"
+    body = (
+        "Hi,\n\n"
+        "Someone requested a password reset for your account. "
+        "Your reset code is:\n\n"
+        f"{reset_token}\n\n"
+        "Enter it on the sign-in page together with a new password. "
+        "The code expires in "
+        f"{settings.RESET_TOKEN_EXPIRE_MINUTES} minutes.\n\n"
+        "If you didn't request this, you can safely ignore this email — "
+        "your password stays unchanged.\n"
+    )
+    if settings.SMTP_HOST:
+        sent = _send_email(email, subject, body)
+        logger.info(
+            "password reset notification handled",
+            recipient=email,
+            sent=sent,
+        )
+        return sent
+    logger.warning(
+        "password reset email skipped (SMTP not configured)",
+        recipient=email,
+        subject=subject,
+    )
+    return False
+
+
 def _send_email(to_email: str, subject: str, body: str) -> bool:
     """Send a plain-text email via SMTP; never raises (task must not crash)."""
     message = EmailMessage()

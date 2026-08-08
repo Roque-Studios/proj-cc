@@ -237,3 +237,97 @@ def test_refresh_rejects_access_token_used_as_refresh(client):
     access_token = _login(client).json()["access_token"]
     resp = client.post("/auth/refresh", json={"refresh_token": access_token})
     assert resp.status_code == 401
+
+
+# --------------------------------------------------------------------------- #
+# Forgot / reset password
+# --------------------------------------------------------------------------- #
+
+
+def test_forgot_password_returns_dev_token_when_smtp_off(client):
+    """No SMTP configured (dev/mock) -> the reset code is handed back directly."""
+    _register(client)
+    resp = client.post("/auth/forgot-password", json={"email": "new@example.com"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["sent"] is True
+    assert body["dev_token"]
+
+
+def test_forgot_password_never_enumrates_accounts(client):
+    """Unknown emails get the same response as known ones (no enumeration)."""
+    resp = client.post("/auth/forgot-password", json={"email": "nobody@example.com"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["sent"] is True
+    assert body["dev_token"] is None
+
+
+def test_forgot_password_normalizes_email(client):
+    _register(client)
+    resp = client.post(
+        "/auth/forgot-password", json={"email": "NEW@Example.COM"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["dev_token"]
+
+
+def test_reset_password_with_valid_code(client):
+    """The full happy path: request code -> reset -> old password fails, new works."""
+    _register(client)
+    token = client.post(
+        "/auth/forgot-password", json={"email": "new@example.com"}
+    ).json()["dev_token"]
+    resp = client.post(
+        "/auth/reset-password",
+        json={"token": token, "new_password": "ChangedPass2"},
+    )
+    assert resp.status_code == 204
+    assert _login(client, password="StrongPass1").status_code == 401
+    assert _login(client, password="ChangedPass2").status_code == 200
+
+
+def test_reset_password_rejects_garbage_token(client):
+    resp = client.post(
+        "/auth/reset-password",
+        json={"token": "garbage-token-value", "new_password": "ChangedPass2"},
+    )
+    assert resp.status_code == 400
+    assert "Invalid or expired" in resp.json()["detail"]
+
+
+def test_reset_password_rejects_access_token(client):
+    """An access token must never be usable as a reset code."""
+    _register(client)
+    access_token = _login(client).json()["access_token"]
+    resp = client.post(
+        "/auth/reset-password",
+        json={"token": access_token, "new_password": "ChangedPass2"},
+    )
+    assert resp.status_code == 400
+    assert _login(client, password="ChangedPass2").status_code == 401
+
+
+def test_reset_password_rejects_expired_code(client):
+    """Expired reset codes are rejected (via a token created in the past)."""
+    _register(client)
+    from app.security import _create_token
+
+    expired = _create_token("1", "reset", -1)  # issued 1 minute in the past
+    resp = client.post(
+        "/auth/reset-password",
+        json={"token": expired, "new_password": "ChangedPass2"},
+    )
+    assert resp.status_code == 400
+
+
+def test_reset_password_validates_complexity(client):
+    """New passwords follow the same complexity rules as registration."""
+    _register(client)
+    token = client.post(
+        "/auth/forgot-password", json={"email": "new@example.com"}
+    ).json()["dev_token"]
+    resp = client.post(
+        "/auth/reset-password", json={"token": token, "new_password": "weak"}
+    )
+    assert resp.status_code == 422

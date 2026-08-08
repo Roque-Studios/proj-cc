@@ -45,8 +45,10 @@ from ..access import resolve_viewer_context
 from ..database import get_db
 from ..media import serve_media, served_content_type
 from ..models import Post, PostMedia
+from ..payments import PaymentProviderError
 from ..schemas import UnlockResponse
-from ..services.broadcasts import BroadcastService, PaymentFailedError
+from ..services.broadcasts import BroadcastNotPaidError, BroadcastService
+from ..services.gateways import resolve_unlock_provider
 from ..storage import get_original_storage
 
 logger = structlog.get_logger()
@@ -166,11 +168,22 @@ def serve_post_media(
     )
 
 
+def _safe_return_url(url: str | None) -> str | None:
+    """Return urls are handed to the payment gateway; only http(s) is allowed."""
+    if url is None:
+        return None
+    if url.startswith(("http://", "https://")):
+        return url
+    return None
+
+
 @router.post("/{post_id}/unlock", response_model=UnlockResponse)
 def unlock_broadcast(
     post_id: int,
     request: Request,
     db: Session = Depends(get_db),
+    success_url: str | None = Query(default=None),
+    cancel_url: str | None = Query(default=None),
 ):
     """Pay the one-time price and unlock a paid broadcast's full content.
 
@@ -216,9 +229,15 @@ def unlock_broadcast(
             detail="Follower subscription required to unlock broadcasts",
         )
 
-    service = BroadcastService(db)
-    # get_unlock returns only *active* unlocks, so a refunded unlock falls
-    # through to unlock() which charges again and reactivates the row.
+    # The unlock checkout uses the creator's enabled gateway (the same
+    # account + webhook secret as their subscription checkout), with a
+    # settings fallback for the zero-config mock/dev path.
+    service = BroadcastService(db, provider=resolve_unlock_provider(db, post.creator_id))
+    # get_unlock returns only *active* (paid) unlocks, so a refunded unlock or
+    # a pending checkout falls through to create_unlock(), which either
+    # re-surfaces the pending checkout url or creates a fresh hosted payment
+    # link. No money is ever charged synchronously — the subscriber pays on
+    # the gateway's page and the webhook activates the unlock.
     existing = service.get_unlock(ctx.user.id, post.id)
     if existing is not None:
         return JSONResponse(
@@ -227,25 +246,37 @@ def unlock_broadcast(
                 post_id=post.id,
                 broadcast_price_cents=post.broadcast_price_cents,
                 already_unlocked=True,
+                checkout_url=None,
                 unlock=existing,
             ).model_dump(mode="json"),
         )
 
     try:
-        unlock, _created = service.unlock(ctx.user.id, post)
-    except PaymentFailedError as exc:
+        unlock, _created, checkout_url = service.create_unlock(
+            ctx.user.id,
+            post,
+            success_url=_safe_return_url(success_url),
+            cancel_url=_safe_return_url(cancel_url),
+        )
+    except BroadcastNotPaidError as exc:
         raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+    except PaymentProviderError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not create the payment link: {exc}",
+        )
     # ``broadcast_price_cents`` was pre-checked above, so the service's
-    # BroadcastNotPaidError can't fire here.
+    # BroadcastNotPaidError can't fire here (kept for safety).
     return JSONResponse(
         status_code=status.HTTP_201_CREATED,
         content=UnlockResponse(
             post_id=post.id,
             broadcast_price_cents=post.broadcast_price_cents,
             already_unlocked=False,
+            checkout_url=checkout_url,
             unlock=unlock,
         ).model_dump(mode="json"),
     )

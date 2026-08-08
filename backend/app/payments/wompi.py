@@ -53,6 +53,7 @@ from pywompi.exceptions import WompiAPIError, WompiAuthError, WompiConnectionErr
 from .base import (
     ChargeRequest,
     ChargeResult,
+    PaymentLinkResult,
     PaymentProvider,
     PaymentProviderError,
     ProviderConfigurationError,
@@ -307,6 +308,48 @@ class WompiPaymentProvider(PaymentProvider):
                 "creator_id": enlace.get("IdentificadorEnlaceComercio"),
             },
             raw=event,
+        )
+
+    def create_one_time_link(self, request: ChargeRequest) -> PaymentLinkResult:
+        """Create a hosted one-time payment link (redirect checkout).
+
+        Wompi has no client-side card collection for unlocks on this platform,
+        so one-time payments use the same hosted **payment link** mechanism as
+        subscriptions: the customer pays on Wompi's page (3DS handled there)
+        and the payment arrives as a flat transaction webhook — the link id
+        doubles as the ``external_ref`` the local unlock row stores. The
+        merchant reference encodes ``unlock_{post_id}`` and the product name
+        describes the unlock so the Wompi dashboard stays readable.
+        """
+        if not self.webhook_url:
+            raise ProviderConfigurationError(
+                "WOMPI_WEBHOOK_URL is required for one-time payment links — Wompi "
+                "notifies the backend through it (POST /api/webhooks/wompi). "
+                "Enter it in the gateway settings before enabling the gateway."
+            )
+        post_id = request.metadata.get("post_id") or request.metadata.get("message_id") or ""
+        configuracion: dict = {
+            "urlWebhook": self.webhook_url,
+            "notificarTransaccionCliente": True,
+        }
+        redirect = request.success_url or self.redirect_url
+        if redirect:
+            configuracion["urlRedirect"] = redirect
+        if request.cancel_url:
+            configuracion["urlRetorno"] = request.cancel_url
+        link = self._client.create_payment_link(
+            {
+                "identificadorEnlaceComercio": f"unlock_{post_id}" if post_id else "unlock",
+                "nombreProducto": request.description
+                or f"Unlock content {post_id}".strip(),
+                "monto": request.amount_cents / 100,
+                "configuracion": configuracion,
+            }
+        )
+        return PaymentLinkResult(
+            external_ref=str(link["idEnlace"]),
+            checkout_url=link.get("urlEnlace"),
+            raw=link,
         )
 
     def charge_one_time(self, request: ChargeRequest) -> ChargeResult:

@@ -6,6 +6,7 @@ import re
 import time
 from typing import Any
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
@@ -18,8 +19,11 @@ from ..deps import get_current_user
 from ..models import User, UserRole
 from ..schemas import (
     ChangePasswordRequest,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
     LogoutRequest,
     RefreshRequest,
+    ResetPasswordRequest,
     TokenResponse,
     UserLogin,
     UserOut,
@@ -29,11 +33,14 @@ from ..security import (
     _DUMMY_HASH,
     create_access_token,
     create_refresh_token,
+    create_reset_token,
     decode_token,
     hash_password,
     verify_password,
 )
 from ..token_store import consume_token, revoke_token
+
+logger = structlog.get_logger()
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -199,6 +206,69 @@ def logout(
 def me(user: User = Depends(get_current_user)):
     """Return the current user for a valid access token."""
     return user
+
+
+@router.post("/forgot-password", response_model=ForgotPasswordResponse)
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    """Request a password-reset code for an email.
+
+    Never reveals whether the account exists (always ``sent: True``). When
+    SMTP is configured the code is emailed (best-effort task — the request
+    never waits on mail); otherwise the code is returned as ``dev_token`` so
+    the flow works without a mail server (development / mock setups).
+    """
+    email = _normalize_email(payload.email)
+    user = db.scalar(select(User).where(User.email == email, User.is_active.is_(True)))
+    if user is None:
+        # Same response as success: don't let the endpoint enumerate accounts.
+        return ForgotPasswordResponse(sent=True)
+
+    token = create_reset_token(str(user.id))
+    if settings.SMTP_HOST:
+        try:
+            from ..tasks import notify_password_reset
+
+            notify_password_reset.delay(user.email, token)
+        except Exception as exc:  # noqa: BLE001 — mail must never break auth
+            logger.exception("failed to enqueue password reset email", error=str(exc))
+        return ForgotPasswordResponse(sent=True)
+    logger.warning(
+        "password reset code returned in dev mode (SMTP not configured)",
+        user_id=user.id,
+        recipient=user.email,
+    )
+    return ForgotPasswordResponse(sent=True, dev_token=token)
+
+
+@router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+def reset_password(
+    payload: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    """Set a new password with a short-lived reset code.
+
+    Only ``type: "reset"`` tokens are accepted — an access or refresh token
+    can never be replayed here. Invalid, expired or wrong-typed codes are all
+    answered identically (400) so the endpoint can't be used to probe tokens.
+    """
+    claims = decode_token(payload.token)
+    if claims is None or claims.get("type") != "reset":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset code",
+        )
+    user = _user_from_claims(db, claims)
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset code",
+        )
+    user.hashed_password = hash_password(payload.new_password)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)

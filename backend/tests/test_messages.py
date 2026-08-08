@@ -10,19 +10,23 @@ pair), and the conversation read endpoints.
 
 from __future__ import annotations
 
+import io
 from datetime import datetime, timedelta, timezone
 
+from PIL import Image
 from sqlalchemy import func, select
 
 from app.models import (
     Conversation,
     CreatorProfile,
     Message,
+    PaidMessageUnlock,
     Subscription,
     SubscriptionStatus,
     User,
     UserRole,
 )
+from app.payments.mock import MockPaymentProvider
 
 NOW = datetime(2026, 8, 6, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -432,6 +436,42 @@ def test_thread_grouping_per_creator_subscriber_pair(client, db_session):
     assert again == conv1
 
 
+def test_conversation_other_includes_creator_avatar(client, db_session):
+    """A creator's avatar url surfaces on the conversation's ``other`` payload.
+
+    The chat UI shows the real creator picture in the inbox and thread head;
+    subscribers have no avatar upload (None -> initials circle).
+    """
+    sub_headers = _register(client, "sub@example.com")
+    with db_session as db:
+        creator_headers = _api_creator(
+            client, db, "creator@example.com", allow_messages=True
+        )
+        creator = db.scalar(select(User).where(User.email == "creator@example.com"))
+        creator_id = creator.id
+        profile = db.scalar(
+            select(CreatorProfile).where(CreatorProfile.user_id == creator_id)
+        )
+        profile.avatar_url = "/media/avatar/creator.png"
+        db.commit()
+        subscriber = db.scalar(select(User).where(User.email == "sub@example.com"))
+        _make_follower(db, subscriber.id, creator_id)
+
+    client.post(
+        "/messages",
+        json={"recipient_id": creator_id, "body": "hi"},
+        headers=sub_headers,
+    )
+
+    # Subscriber sees the creator's avatar on ``other``.
+    sub_convo = client.get("/conversations", headers=sub_headers).json()[0]
+    assert sub_convo["other"]["avatar_url"] == "/media/avatar/creator.png"
+
+    # The creator sees the subscriber's ``other`` — no avatar upload.
+    creator_convo = client.get("/conversations", headers=creator_headers).json()[0]
+    assert creator_convo["other"]["avatar_url"] is None
+
+
 def test_conversation_listing_requires_auth(client):
     assert client.get("/conversations").status_code == 401
 
@@ -696,3 +736,195 @@ def test_messages_status_self_and_creator_to_creator(client, db_session):
 
     resp = client.get(f"/messages/status?recipient_id={a_id}", headers=creator_a_headers)
     assert resp.json()["can_message"] is False
+
+
+# --------------------------------------------------------------------------- #
+# Paid message content (one-time unlock of media DMs)
+# --------------------------------------------------------------------------- #
+
+
+def _real_jpeg(width: int = 320, height: int = 240) -> bytes:
+    """A real decodable JPEG (served media is re-encoded, so it must decode)."""
+    buf = io.BytesIO()
+    Image.new("RGB", (width, height), (120, 60, 200)).save(buf, format="JPEG", quality=90)
+    return buf.getvalue()
+
+
+def _send_paid_media(client, headers, recipient_id: int, *, price_cents="500", body="Exclusive pic"):
+    return client.post(
+        "/messages/media",
+        headers=headers,
+        data={
+            "recipient_id": str(recipient_id),
+            "body": body,
+            "price_cents": str(price_cents),
+        },
+        files=[("files", ("photo.jpg", _real_jpeg(), "image/jpeg"))],
+    )
+
+
+def _paid_webhook(client, external_ref: str, event_id: str):
+    body = MockPaymentProvider.make_webhook_body(
+        "payment.succeeded", external_ref=external_ref, event_id=event_id
+    )
+    return client.post(
+        "/webhooks/mock", data=body, headers=MockPaymentProvider.sign_body(body)
+    )
+
+
+def test_creator_sends_paid_media_message(client, db_session):
+    """A creator's paid media DM is locked for the recipient, open for the sender."""
+    with db_session as db:
+        creator_headers = _api_creator(client, db, "creator@example.com")
+    sub_headers = _register(client, "sub@example.com")
+    with db_session as db:
+        sub_id = db.scalar(select(User).where(User.email == "sub@example.com")).id
+
+    resp = _send_paid_media(client, creator_headers, sub_id, price_cents="500")
+    assert resp.status_code == 201
+    msg = resp.json()
+    assert msg["price_cents"] == 500
+    assert msg["unlocked"] is True  # the sender always has access
+    assert msg["media"][0]["media_url"].startswith("/messages/")
+
+    # The recipient's history shows it locked; media fetch is denied.
+    conv = client.get("/conversations", headers=sub_headers).json()[0]
+    item = client.get(
+        f"/conversations/{conv['id']}/messages", headers=sub_headers
+    ).json()["messages"][0]
+    assert item["price_cents"] == 500
+    assert item["unlocked"] is False
+    media_url = item["media"][0]["media_url"]
+    assert client.get(media_url, headers=sub_headers).status_code == 403
+    # Anonymous can't even probe it.
+    assert client.get(media_url).status_code == 401
+
+
+def test_subscriber_unlocks_paid_message(client, db_session):
+    """Hosted checkout -> payment webhook -> the paid DM media unlocks."""
+    with db_session as db:
+        creator_headers = _api_creator(client, db, "creator@example.com")
+    sub_headers = _register(client, "sub@example.com")
+    with db_session as db:
+        sub_id = db.scalar(select(User).where(User.email == "sub@example.com")).id
+
+    msg = _send_paid_media(client, creator_headers, sub_id, price_cents="500").json()
+    media_url = msg["media"][0]["media_url"]
+
+    # Unlock creates the hosted checkout — no synchronous charge, still locked.
+    unlock = client.post(f"/messages/{msg['id']}/unlock", headers=sub_headers)
+    assert unlock.status_code == 200
+    body = unlock.json()
+    assert body["already_unlocked"] is False
+    assert body["checkout_url"].startswith("https://mock.checkout/")
+    assert client.get(media_url, headers=sub_headers).status_code == 403
+
+    # The hosted payment completes -> signed webhook -> access granted.
+    with db_session as db:
+        charge_ref = db.scalar(
+            select(PaidMessageUnlock.external_ref).where(
+                PaidMessageUnlock.message_id == msg["id"]
+            )
+        )
+    assert _paid_webhook(client, charge_ref, "evt_paid_msg_1").status_code == 200
+
+    assert client.get(media_url, headers=sub_headers).status_code == 200
+    conv = client.get("/conversations", headers=sub_headers).json()[0]
+    item = client.get(
+        f"/conversations/{conv['id']}/messages", headers=sub_headers
+    ).json()["messages"][0]
+    assert item["unlocked"] is True
+
+
+def test_free_media_message_is_not_paid(client, db_session):
+    """A media DM without a price is free: unlocked is None and media is open."""
+    with db_session as db:
+        creator_headers = _api_creator(client, db, "creator@example.com")
+    sub_headers = _register(client, "sub@example.com")
+    with db_session as db:
+        sub_id = db.scalar(select(User).where(User.email == "sub@example.com")).id
+
+    resp = client.post(
+        "/messages/media",
+        headers=creator_headers,
+        data={"recipient_id": str(sub_id), "body": "Just a pic"},
+        files=[("files", ("photo.jpg", _real_jpeg(), "image/jpeg"))],
+    )
+    assert resp.status_code == 201
+    msg = resp.json()
+    assert msg["price_cents"] is None
+    assert msg["unlocked"] is None
+
+    conv = client.get("/conversations", headers=sub_headers).json()[0]
+    item = client.get(
+        f"/conversations/{conv['id']}/messages", headers=sub_headers
+    ).json()["messages"][0]
+    assert item["unlocked"] is None
+    assert client.get(item["media"][0]["media_url"], headers=sub_headers).status_code == 200
+
+
+def test_subscriber_cannot_send_paid_content(client, db_session):
+    """Only creators can set a price on a DM (subscribers get a clear 400)."""
+    with db_session as db:
+        creator_headers = _api_creator(client, db, "creator@example.com")
+        creator_id = db.scalar(select(User).where(User.email == "creator@example.com")).id
+    sub_headers = _register(client, "sub@example.com")
+
+    # Multipart path.
+    resp = _send_paid_media(client, sub_headers, creator_id, price_cents="500")
+    assert resp.status_code == 400
+    assert "creator" in resp.json()["detail"].lower()
+
+    # JSON path must be equally guarded (the check lives in the service).
+    json_resp = client.post(
+        "/messages",
+        json={"recipient_id": creator_id, "body": "hi", "price_cents": 500},
+        headers=sub_headers,
+    )
+    assert json_resp.status_code == 400
+    assert "creator" in json_resp.json()["detail"].lower()
+
+
+def test_media_endpoint_participants_only(client, db_session):
+    """Message media 404s for non-participants, 401 anonymously, 403 while locked."""
+    with db_session as db:
+        creator_headers = _api_creator(client, db, "creator@example.com")
+    sub_headers = _register(client, "sub@example.com")
+    outsider_headers = _register(client, "outsider@example.com")
+    with db_session as db:
+        sub_id = db.scalar(select(User).where(User.email == "sub@example.com")).id
+
+    msg = _send_paid_media(client, creator_headers, sub_id, price_cents="500").json()
+    media_url = msg["media"][0]["media_url"]
+
+    assert client.get(media_url, headers=outsider_headers).status_code == 404
+    assert client.get(media_url).status_code == 401
+    assert client.get(media_url, headers=sub_headers).status_code == 403
+
+
+def test_paid_message_unlock_is_idempotent(client, db_session):
+    """A pending repeat re-surfaces the same checkout; one row total."""
+    with db_session as db:
+        creator_headers = _api_creator(client, db, "creator@example.com")
+    sub_headers = _register(client, "sub@example.com")
+    with db_session as db:
+        sub_id = db.scalar(select(User).where(User.email == "sub@example.com")).id
+
+    msg = _send_paid_media(client, creator_headers, sub_id, price_cents="300").json()
+
+    first = client.post(f"/messages/{msg['id']}/unlock", headers=sub_headers).json()
+    again = client.post(f"/messages/{msg['id']}/unlock", headers=sub_headers).json()
+    assert again["checkout_url"] == first["checkout_url"]
+    assert again["already_unlocked"] is False
+    with db_session as db:
+        rows = db.scalars(
+            select(PaidMessageUnlock).where(PaidMessageUnlock.message_id == msg["id"])
+        ).all()
+        assert len(rows) == 1
+        charge_ref = rows[0].external_ref
+
+    # After payment a repeat unlock reports already_unlocked with no url.
+    assert _paid_webhook(client, charge_ref, "evt_paid_msg_idem_1").status_code == 200
+    paid = client.post(f"/messages/{msg['id']}/unlock", headers=sub_headers).json()
+    assert paid["already_unlocked"] is True
+    assert paid["checkout_url"] is None

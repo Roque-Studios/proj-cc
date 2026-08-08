@@ -132,6 +132,30 @@ def test_expired_subscription_gets_teaser(client, db_session):
     assert resp.json()["teaser"] is True
 
 
+def test_owner_feed_shows_own_paid_broadcasts_unlocked(client, db_session):
+    """The creator viewing their own feed never sees their paid content locked."""
+    creator_headers = _make_creator(client)
+    resp = client.post(
+        "/posts",
+        headers=creator_headers,
+        data={"caption": "Pay to see", "price_cents": "500"},
+        files=[("files", ("photo.jpg", _real_jpeg(), "image/jpeg"))],
+    )
+    assert resp.status_code == 201
+    post = resp.json()
+
+    feed = client.get(
+        f"/creators/{post['creator_id']}/posts", headers=creator_headers
+    )
+    assert feed.status_code == 200
+    body = feed.json()
+    assert body["teaser"] is False
+    item = body["posts"][0]
+    # The owner always has full access: unlocked, real media urls, no preview.
+    assert item["unlocked"] is True
+    assert item["media"][0]["media_url"].startswith("/content/")
+
+
 def test_follower_gets_full_feed(client, db_session):
     creator_headers = _make_creator(client)
     first = _upload_post(client, creator_headers, "Post one")

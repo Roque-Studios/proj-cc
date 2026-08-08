@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 21600
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 10080
+    # How long a password-reset code stays valid.
+    RESET_TOKEN_EXPIRE_MINUTES: int = 30
     DEFAULT_ADMIN_EMAIL: str = "admin@admin.com"
     DEFAULT_ADMIN_PASSWORD: str = "admin"
 

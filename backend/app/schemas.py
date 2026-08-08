@@ -58,6 +58,42 @@ class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str = Field(min_length=8, max_length=128)
 
+
+class ForgotPasswordRequest(BaseModel):
+    """Request a password reset code for an email address."""
+
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    """Result of a reset-code request.
+
+    The response never reveals whether the account exists (``sent`` is always
+    True). ``dev_token`` is only populated when no SMTP mail server is
+    configured — the development affordance that hands the reset code to the
+    requester directly instead of emailing it.
+    """
+
+    sent: bool = True
+    dev_token: str | None = None
+
+
+class ResetPasswordRequest(BaseModel):
+    """Set a new password with a reset code.
+
+    ``token`` is the short-lived reset JWT (``type: "reset"``) from
+    ``POST /auth/forgot-password``; ``new_password`` follows the same
+    complexity rules as registration.
+    """
+
+    token: str = Field(min_length=10, max_length=2048)
+    new_password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def _validate_password_complexity(cls, value: str) -> str:
+        return validate_password_complexity(value)
+
     @field_validator("new_password")
     @classmethod
     def _validate_password_complexity(cls, value: str) -> str:
@@ -382,12 +418,14 @@ class UnlockResponse(BaseModel):
     """Result of unlocking a paid broadcast.
 
     ``already_unlocked`` is True on an idempotent repeat of a previous unlock
-    (no second charge); the ``unlock`` row is the same either way.
+    (no second charge); ``checkout_url`` is the hosted payment page the
+    subscriber is sent to pay on (None when already unlocked).
     """
 
     post_id: int
     broadcast_price_cents: int
     already_unlocked: bool
+    checkout_url: str | None = None
     unlock: PaidUnlockOut
 
 
@@ -505,6 +543,9 @@ class MessageSend(BaseModel):
 
     recipient_id: int
     body: str = Field(min_length=1, max_length=2000)
+    # One-time unlock price in cents — when set, the message is a **paid
+    # message** whose media the recipient unlocks for a one-time payment.
+    price_cents: int | None = Field(default=None, ge=1, le=100_000)
 
     @field_validator("body")
     @classmethod
@@ -514,16 +555,73 @@ class MessageSend(BaseModel):
         return value.strip()
 
 
+class MessageMediaOut(BaseModel):
+    id: int
+    message_id: int
+    media_type: str
+    media_url: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class MessageOut(BaseModel):
     id: int
     conversation_id: int
     sender_id: int
     recipient_id: int
     body: str
+    price_cents: int | None = None
+    media: list[MessageMediaOut] = []
+    # The requesting viewer's access to a paid message: None for free
+    # messages, True once unlocked (or the sender themselves), False while
+    # still locked.
+    unlocked: bool | None = None
     read_at: datetime | None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+def build_message_out(message, unlocked: bool | None) -> MessageOut:
+    """Shape a ``Message`` row for one viewer.
+
+    ``unlocked`` is the caller-computed access state (None for free messages;
+    True for the sender or an active unlock; False for a locked paid message).
+    Media urls are always the auth-gated ``/messages/{id}/media`` endpoint.
+    """
+    return MessageOut(
+        id=message.id,
+        conversation_id=message.conversation_id,
+        sender_id=message.sender_id,
+        recipient_id=message.recipient_id,
+        body=message.body,
+        price_cents=message.price_cents,
+        media=[
+            MessageMediaOut(
+                id=m.id,
+                message_id=m.message_id,
+                media_type=m.media_type,
+                media_url=m.media_url,
+            )
+            for m in message.media
+        ],
+        unlocked=unlocked,
+        read_at=message.read_at,
+        created_at=message.created_at,
+    )
+
+
+class MessageUnlockResponse(BaseModel):
+    """Result of unlocking a paid message.
+
+    ``checkout_url`` is the hosted payment page the subscriber is redirected
+    to (None when already unlocked — an idempotent repeat).
+    """
+
+    message_id: int
+    price_cents: int
+    already_unlocked: bool
+    checkout_url: str | None = None
 
 
 class MessagesPageOut(BaseModel):
@@ -562,6 +660,9 @@ class MessagesStatusOut(BaseModel):
 class UserSummaryOut(BaseModel):
     id: int
     username: str | None
+    # The other party's avatar url (creator profiles only — subscribers have
+    # no avatar upload). ``None``/missing -> the UI shows an initials avatar.
+    avatar_url: str | None = None
 
 
 class ConversationOut(BaseModel):

@@ -6,6 +6,7 @@ import '../components/buttons/button.ts'
 import '../components/layouts/card.ts'
 import '../components/feedback/alert.ts'
 import '../components/feedback/spinner.ts'
+import '../components/auth/password-reset.ts'
 import { api, ApiError, getAccessToken, setTokens } from '../lib/api'
 
 /**
@@ -19,7 +20,7 @@ import { api, ApiError, getAccessToken, setTokens } from '../lib/api'
  */
 @customElement('roque-login-page')
 export class LoginPage extends LitElement {
-  @state() private mode: 'login' | 'register' = 'login'
+  @state() private mode: 'login' | 'register' | 'reset' = 'login'
   @state() private email = ''
   @state() private username = ''
   @state() private password = ''
@@ -205,6 +206,19 @@ export class LoginPage extends LitElement {
     this.mode = this.mode === 'login' ? 'register' : 'login'
   }
 
+  private _showReset() {
+    this.error = ''
+    this.mode = 'reset'
+  }
+
+  private _onResetSuccess() {
+    // Back to the sign-in form with a pointer to the new flow.
+    this.error = ''
+    this.mode = 'login'
+    this.password = ''
+    this.confirm = ''
+  }
+
   private _onEmail(e: CustomEvent) {
     this.email = (e.detail?.value ?? '').trim()
   }
@@ -227,102 +241,129 @@ export class LoginPage extends LitElement {
     }
 
     const isRegister = this.mode === 'register'
+    const isReset = this.mode === 'reset'
 
     return html`
       <div class="login-wrap">
         <div class="login-card">
           <div class="brand">
-            <h1>${isRegister ? 'Create your account' : 'Welcome back'}</h1>
-            <p>Sign in to subscribe to creators</p>
+            <h1>${isReset
+              ? 'Reset your password'
+              : isRegister
+                ? 'Create your account'
+                : 'Welcome back'}</h1>
+            <p>${isReset
+              ? 'Enter your email to receive a reset code'
+              : 'Sign in to subscribe to creators'}</p>
           </div>
 
-          <roque-card heading="${isRegister ? 'Create account' : 'Sign in'}">
-            ${isRegister
-              ? html`<div class="form-row">
-                  <roque-text-field
-                    label="Username (optional)"
-                    placeholder="yourname"
-                    .value="${this.username}"
-                    @aero-input="${this._onUsername}"
-                  ></roque-text-field>
-                </div>`
-              : ''}
-
-            <div class="form-row">
-              <roque-text-field
-                label="Email"
-                placeholder="you@example.com"
-                .value="${this.email}"
-                @aero-input="${this._onEmail}"
-              ></roque-text-field>
-            </div>
-
-            <div class="form-row">
-              <roque-text-field
-                type="password"
-                label="Password"
-                placeholder="••••••••"
-                .value="${this.password}"
-                @aero-input="${this._onPassword}"
-              ></roque-text-field>
-            </div>
-
-            ${isRegister
-              ? html`<div class="form-row">
-                  <roque-text-field
-                    type="password"
-                    label="Confirm password"
-                    placeholder="••••••••"
-                    .value="${this.confirm}"
-                    @aero-input="${this._onConfirm}"
-                  ></roque-text-field>
-                </div>`
-              : ''}
-
-            ${this.error
-              ? html`<roque-alert
-                  type="error"
-                  heading="${isRegister ? 'Cannot create account' : 'Cannot sign in'}"
-                  message="${this.error}"
-                  @aero-dismiss="${() => (this.error = '')}"
-                ></roque-alert>`
-              : ''}
-
-            <div class="actions">
-              <roque-button
-                context="clear"
-                buttonId="login-home"
-                @aero-click="${() => this._go('/')}"
-                >Back to site</roque-button
-              >
-              <roque-button
-                context="submit"
-                buttonId="login-btn"
-                @aero-click="${this._submit}"
-                >${this.busy
-                  ? isRegister
-                    ? 'Creating account…'
-                    : 'Signing in…'
-                  : isRegister
-                    ? 'Create account'
-                    : 'Sign in'}</roque-button
-              >
-            </div>
-
-            <p class="mode-switch">
-              ${isRegister
-                ? html`Already have an account?
-                    <button @click="${this._toggleMode}">Sign in</button>`
-                : html`New here?
-                    <button @click="${this._toggleMode}">Create an account</button>`}
-            </p>
-
-            ${isRegister
-              ? html`<p class="hint">
-                  Passwords need at least 8 characters, one lowercase, one
-                  uppercase and one digit.
+          <roque-card heading="${isReset
+            ? 'Password reset'
+            : isRegister
+              ? 'Create account'
+              : 'Sign in'}">
+            ${isReset
+              ? html`<roque-password-reset
+                  @aero-password-reset-success="${this._onResetSuccess}"
+                ></roque-password-reset>
+                <p class="mode-switch">
+                  Remembered it?
+                  <button @click="${this._toggleMode}">Back to sign in</button>
                 </p>`
-              : ''}
+              : html`
+                  ${isRegister
+                    ? html`<div class="form-row">
+                        <roque-text-field
+                          label="Username (optional)"
+                          placeholder="yourname"
+                          .value="${this.username}"
+                          @aero-input="${this._onUsername}"
+                        ></roque-text-field>
+                      </div>`
+                    : ''}
+
+                  <div class="form-row">
+                    <roque-text-field
+                      label="Email"
+                      placeholder="you@example.com"
+                      .value="${this.email}"
+                      @aero-input="${this._onEmail}"
+                    ></roque-text-field>
+                  </div>
+
+                  <div class="form-row">
+                    <roque-text-field
+                      type="password"
+                      label="Password"
+                      placeholder="••••••••"
+                      .value="${this.password}"
+                      @aero-input="${this._onPassword}"
+                    ></roque-text-field>
+                  </div>
+
+                  ${isRegister
+                    ? html`<div class="form-row">
+                        <roque-text-field
+                          type="password"
+                          label="Confirm password"
+                          placeholder="••••••••"
+                          .value="${this.confirm}"
+                          @aero-input="${this._onConfirm}"
+                        ></roque-text-field>
+                      </div>`
+                    : ''}
+
+                  ${!isRegister
+                    ? html`<p class="mode-switch" style="margin-top:0;text-align:right">
+                        <button @click="${this._showReset}">Forgot password?</button>
+                      </p>`
+                    : ''}
+
+                  ${this.error
+                    ? html`<roque-alert
+                        type="error"
+                        heading="${isRegister ? 'Cannot create account' : 'Cannot sign in'}"
+                        message="${this.error}"
+                        @aero-dismiss="${() => (this.error = '')}"
+                      ></roque-alert>`
+                    : ''}
+
+                  <div class="actions">
+                    <roque-button
+                      context="clear"
+                      buttonId="login-home"
+                      @aero-click="${() => this._go('/')}"
+                      >Back to site</roque-button
+                    >
+                    <roque-button
+                      context="submit"
+                      buttonId="login-btn"
+                      @aero-click="${this._submit}"
+                      >${this.busy
+                        ? isRegister
+                          ? 'Creating account…'
+                          : 'Signing in…'
+                        : isRegister
+                          ? 'Create account'
+                          : 'Sign in'}</roque-button
+                    >
+                  </div>
+
+                  <p class="mode-switch">
+                    ${isRegister
+                      ? html`Already have an account?
+                          <button @click="${this._toggleMode}">Sign in</button>`
+                      : html`New here?
+                          <button @click="${this._toggleMode}">Create an account</button>`}
+                  </p>
+
+                  ${isRegister
+                    ? html`<p class="hint">
+                        Passwords need at least 8 characters, one lowercase,
+                        one uppercase and one digit.
+                      </p>`
+                    : ''}
+                `}
           </roque-card>
         </div>
       </div>

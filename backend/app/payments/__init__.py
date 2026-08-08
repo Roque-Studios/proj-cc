@@ -10,6 +10,7 @@ Public API:
 from .base import (
     ChargeRequest,
     ChargeResult,
+    PaymentLinkResult,
     PaymentProvider,
     PaymentProviderError,
     ProviderConfigurationError,
@@ -25,6 +26,7 @@ __all__ = [
     "ChargeRequest",
     "ChargeResult",
     "PAYMENT_PROVIDERS",
+    "PaymentLinkResult",
     "PaymentProvider",
     "PaymentProviderError",
     "ProviderConfigurationError",

@@ -36,6 +36,7 @@ from ..payments import (
 )
 from ..payments.factory import build_provider_from_config
 from ..services.broadcasts import BroadcastService
+from ..services.paid_messages import PaidMessageService
 from ..services.subscriptions import SubscriptionService
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -116,9 +117,22 @@ async def handle_webhook(
             detail=f"Webhook verification failed: {last_error}",
         )
 
+    # One-time unlocks (paid broadcasts and paid DM messages) own their refs —
+    # route payment events by the stored ref so a completed charge activates
+    # the right unlock instead of being reconciled against a subscription, and
+    # a refund revokes the right unlock. Everything else (subscription
+    # lifecycle) falls through to the subscription reconciler.
+    broadcast = BroadcastService(db, provider=provider)
+    paid_messages = PaidMessageService(db, provider=provider)
     if event.event_type == WebhookEventType.payment_refunded:
-        # One-time unlock refund: separate from the subscription lifecycle.
-        event = BroadcastService(db, provider=provider).handle_refunded(event)
+        if broadcast.find_by_ref(event.external_ref) is not None:
+            event = broadcast.handle_refunded(event)
+        else:
+            event = paid_messages.handle_refunded(event)
+    elif broadcast.find_by_ref(event.external_ref) is not None:
+        event = broadcast.handle_paid(event)
+    elif paid_messages.find_by_ref(event.external_ref) is not None:
+        event = paid_messages.handle_paid(event)
     else:
         event = SubscriptionService(db, provider=provider).handle_webhook(
             body, headers, event=event

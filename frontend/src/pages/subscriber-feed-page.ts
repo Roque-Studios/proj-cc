@@ -158,6 +158,13 @@ export class SubscriberFeedPage extends LitElement {
       white-space: pre-wrap;
     }
 
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
     .social-row {
       display: flex;
       flex-wrap: wrap;
@@ -372,6 +379,24 @@ export class SubscriberFeedPage extends LitElement {
                 </p>
                 ${profile.bio
                   ? html`<p class="hero-bio">${profile.bio}</p>`
+                  : nothing}
+                ${isFollower
+                  ? html`<div class="hero-actions">
+                      <roque-button
+                        context="clear"
+                        buttonId="feed-message"
+                        @aero-click="${() =>
+                          (window.location.href =
+                            '/chat?recipient=' +
+                            this.creatorId +
+                            '&name=' +
+                            encodeURIComponent(displayName) +
+                            '&avatar=' +
+                            encodeURIComponent(profile.avatar_url || ''))}"
+                        ><roque-icon name="chat" size="14" style="margin-right:6px"></roque-icon
+                        >Message</roque-button
+                      >
+                    </div>`
                   : nothing}
               </div>
             </div>

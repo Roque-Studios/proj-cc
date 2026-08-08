@@ -84,6 +84,11 @@ class ChargeRequest:
     # tokenization). Optional — gateways with hosted checkout (Stripe/PayPal
     # one-time links) don't need it; Wompi's tokenized charge does.
     payment_method_token: str | None = None
+    # Hosted-checkout return urls (one-time payment links). After the customer
+    # pays on the gateway's page they are redirected back to ``success_url``;
+    # ``cancel_url`` is where they land if they back out.
+    success_url: str | None = None
+    cancel_url: str | None = None
 
 
 @dataclass
@@ -92,6 +97,20 @@ class ChargeResult:
     status: str  # succeeded | pending | failed
     amount_cents: int
     currency: str
+    raw: dict = field(default_factory=dict)
+
+
+@dataclass
+class PaymentLinkResult:
+    """A hosted one-time payment link (the unlock equivalent of a checkout).
+
+    ``external_ref`` is the gateway resource id to reconcile the payment
+    webhook against (the Wompi link id / Stripe checkout session id / PayPal
+    order id); ``checkout_url`` is where the customer pays on the hosted page.
+    """
+
+    external_ref: str
+    checkout_url: str | None = None
     raw: dict = field(default_factory=dict)
 
 
@@ -176,6 +195,15 @@ class PaymentProvider(ABC):
     @abstractmethod
     def charge_one_time(self, request: ChargeRequest) -> ChargeResult:
         """Charge a one-time amount."""
+
+    @abstractmethod
+    def create_one_time_link(self, request: ChargeRequest) -> PaymentLinkResult:
+        """Create a hosted one-time payment link (redirect checkout).
+
+        The customer pays on the gateway's page (card/wallet collected there)
+        and the outcome arrives by webhook — the same hosted pattern as
+        subscriptions, so no client-side card tokenization is ever needed.
+        """
 
     @classmethod
     def from_settings(cls, settings) -> "PaymentProvider":

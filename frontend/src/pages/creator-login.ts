@@ -5,6 +5,7 @@ import '../components/inputs/text-field.ts'
 import '../components/buttons/button.ts'
 import '../components/layouts/card.ts'
 import '../components/feedback/alert.ts'
+import '../components/auth/password-reset.ts'
 import { api, ApiError, setTokens } from '../lib/api'
 
 /**
@@ -15,6 +16,7 @@ import { api, ApiError, setTokens } from '../lib/api'
  */
 @customElement('roque-creator-login')
 export class CreatorLogin extends LitElement {
+  @state() private mode: 'login' | 'reset' = 'login'
   @state() private email = ''
   @state() private password = ''
   @state() private error = ''
@@ -74,7 +76,45 @@ export class CreatorLogin extends LitElement {
       justify-content: flex-end;
       margin-top: 16px;
     }
+
+    .mode-switch {
+      margin-top: 14px;
+      text-align: center;
+      font-size: 12px;
+      color: #4a5b6e;
+    }
+
+    .mode-switch button {
+      background: none;
+      border: none;
+      padding: 0;
+      font: inherit;
+      color: #1e6fb4;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
+    .mode-switch button:hover {
+      color: #165a92;
+    }
   `
+
+  private _showReset() {
+    this.error = ''
+    this.mode = 'reset'
+  }
+
+  private _backToLogin() {
+    this.error = ''
+    this.mode = 'login'
+  }
+
+  private _onResetSuccess() {
+    // Password changed — back to the sign-in form to use the new one.
+    this.error = ''
+    this.mode = 'login'
+    this.password = ''
+  }
 
   private _onEmail(e: CustomEvent) {
     this.email = (e.detail?.value ?? '').trim()
@@ -113,6 +153,8 @@ export class CreatorLogin extends LitElement {
   }
 
   render() {
+    const isReset = this.mode === 'reset'
+
     return html`
       <div class="login-wrap">
         <div class="login-card">
@@ -121,52 +163,57 @@ export class CreatorLogin extends LitElement {
             <p>Content Creator Engine — admin panel</p>
           </div>
 
-          <roque-card heading="Sign in">
-            <div class="form-row">
-              <roque-text-field
-                label="Email"
-                placeholder="you@creator.io"
-                .value="${this.email}"
-                @aero-input="${this._onEmail}"
-              ></roque-text-field>
-            </div>
+          <roque-card heading="${isReset ? 'Password reset' : 'Sign in'}">
+            ${isReset
+              ? html`<roque-password-reset
+                  @aero-password-reset-success="${this._onResetSuccess}"
+                ></roque-password-reset>
+                <p class="mode-switch">
+                  Remembered it?
+                  <button @click="${this._backToLogin}">Back to sign in</button>
+                </p>`
+              : html`
+                  <div class="form-row">
+                    <roque-text-field
+                      label="Email"
+                      placeholder="you@creator.io"
+                      .value="${this.email}"
+                      @aero-input="${this._onEmail}"
+                    ></roque-text-field>
+                  </div>
 
-            <div class="form-row">
-              <roque-text-field
-                type="password"
-                label="Password"
-                placeholder="••••••••"
-                .value="${this.password}"
-                @aero-input="${this._onPassword}"
-              ></roque-text-field>
-            </div>
+                  <div class="form-row">
+                    <roque-text-field
+                      type="password"
+                      label="Password"
+                      placeholder="••••••••"
+                      .value="${this.password}"
+                      @aero-input="${this._onPassword}"
+                    ></roque-text-field>
+                  </div>
 
-            ${this.error
-              ? html`<roque-alert
-                  type="error"
-                  heading="Cannot sign in"
-                  message="${this.error}"
-                  @aero-dismiss="${() => (this.error = '')}"
-                ></roque-alert>`
-              : ''}
+                  <p class="mode-switch" style="margin-top:0;text-align:right">
+                    <button @click="${this._showReset}">Forgot password?</button>
+                  </p>
 
-            <div class="actions">
-              <roque-button
-                context="submit"
-                buttonId="login-btn"
-                @aero-click="${this._submit}"
-                >${this.busy ? 'Signing in…' : 'Sign in'}</roque-button
-              >
-            </div>
+                  ${this.error
+                    ? html`<roque-alert
+                        type="error"
+                        heading="Cannot sign in"
+                        message="${this.error}"
+                        @aero-dismiss="${() => (this.error = '')}"
+                      ></roque-alert>`
+                    : ''}
 
-            <p class="hint">
-              This is the creator (admin) sign-in — reach it from
-              <code>/admin</code> (or the <code>/settings.html</code> alias).
-              Non-creator accounts are redirected away.
-              <br />
-              Tip: seed the creator account with
-              <code>python -m app.seed_creator</code>.
-            </p>
+                  <div class="actions">
+                    <roque-button
+                      context="submit"
+                      buttonId="login-btn"
+                      @aero-click="${this._submit}"
+                      >${this.busy ? 'Signing in…' : 'Sign in'}</roque-button
+                    >
+                  </div>
+                `}
           </roque-card>
         </div>
       </div>

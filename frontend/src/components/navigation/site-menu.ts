@@ -272,6 +272,10 @@ export class SiteMenu extends LitElement {
         <div class="nav-list">
           ${signedIn
             ? html`
+                <div class="nav-item" role="menuitem" @click="${() => this._go('/chat')}">
+                  <roque-icon name="chat" size="16"></roque-icon>
+                  <span>Messages</span>
+                </div>
                 <div class="nav-item" role="menuitem" @click="${() => this._go('/profile')}">
                   <roque-icon name="user" size="16"></roque-icon>
                   <span>My profile</span>

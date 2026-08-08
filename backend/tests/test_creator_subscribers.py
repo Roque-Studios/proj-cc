@@ -365,6 +365,17 @@ def test_unlock_flow_records_and_refund_excludes_one_time_revenue(client, db_ses
     assert unlock.status_code == 201
     charge_ref = unlock.json()["unlock"]["external_ref"]
 
+    # The payment completes on the hosted checkout page -> signed webhook.
+    body = MockPaymentProvider.make_webhook_body(
+        "payment.succeeded", external_ref=charge_ref, event_id="evt_paid_subs_1"
+    )
+    assert (
+        client.post(
+            "/webhooks/mock", data=body, headers=MockPaymentProvider.sign_body(body)
+        ).status_code
+        == 200
+    )
+
     summary = client.get("/creator/subscribers", headers=_bearer(token)).json()["summary"]
     assert summary["one_time_revenue_cents"] == 500
     assert summary["total_revenue_cents"] == 500
@@ -460,9 +471,19 @@ def test_revenue_survives_post_deletion(client, db_session):
         fan = db.get(User, _user_id(db, "fan@example.com"))
         creator = db.get(User, _user_id(db, "cr@example.com"))
         _subscribe(db, fan.id, creator.id, ref="sub_survive_1")
+    unlock = client.post(f"/content/{post_id}/unlock", headers=_bearer(fan_token))
+    assert unlock.status_code == 201
+    charge_ref = unlock.json()["unlock"]["external_ref"]
+
+    # The payment completes on the hosted checkout page -> signed webhook.
+    body = MockPaymentProvider.make_webhook_body(
+        "payment.succeeded", external_ref=charge_ref, event_id="evt_paid_survive_1"
+    )
     assert (
-        client.post(f"/content/{post_id}/unlock", headers=_bearer(fan_token)).status_code
-        == 201
+        client.post(
+            "/webhooks/mock", data=body, headers=MockPaymentProvider.sign_body(body)
+        ).status_code
+        == 200
     )
 
     # Delete the post (and its PaidUnlock rows) — the payment row must remain.

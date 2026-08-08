@@ -23,6 +23,7 @@ _MAX_SIGNATURE_AGE_SECONDS = 300
 from .base import (
     ChargeRequest,
     ChargeResult,
+    PaymentLinkResult,
     PaymentProvider,
     PaymentProviderError,
     ProviderConfigurationError,
@@ -232,6 +233,33 @@ class StripePaymentProvider(PaymentProvider):
             period_end=period_end,
             metadata=metadata,
             raw=payload,
+        )
+
+    def create_one_time_link(self, request: ChargeRequest) -> PaymentLinkResult:
+        """Create a hosted Checkout Session for a one-time payment.
+
+        Stripe collects the payment method on its hosted page; the completion
+        webhook (``checkout.session.completed``) activates the unlock.
+        """
+        name = request.description or "Content unlock"
+        data = {
+            "mode": "payment",
+            "line_items[0][price_data][currency]": request.currency,
+            "line_items[0][price_data][unit_amount]": str(request.amount_cents),
+            "line_items[0][price_data][product_data][name]": name,
+            "line_items[0][quantity]": "1",
+            "success_url": request.success_url or "https://example.com/success",
+            "cancel_url": request.cancel_url or "https://example.com/cancel",
+        }
+        for key, value in request.metadata.items():
+            data[f"metadata[{key}]"] = str(value)
+        resp = self._client.post("/checkout/sessions", data=data)
+        self._raise_for_status(resp)
+        session = resp.json()
+        return PaymentLinkResult(
+            external_ref=session["id"],
+            checkout_url=session.get("url"),
+            raw=session,
         )
 
     def charge_one_time(self, request: ChargeRequest) -> ChargeResult:

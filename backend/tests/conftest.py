@@ -29,6 +29,8 @@ from app.models import (
     CreatorGatewayConfig,
     CreatorProfile,
     Message,
+    MessageMedia,
+    PaidMessageUnlock,
     PaidUnlock,
     Payment,
     Post,
@@ -77,6 +79,8 @@ def _clean_db():
     with _TestSession() as db:
         db.query(ProcessedWebhookEvent).delete()
         db.query(PaidUnlock).delete()  # FKs to post + user
+        db.query(PaidMessageUnlock).delete()  # FKs to message + user
+        db.query(MessageMedia).delete()  # FK to message
         db.query(Payment).delete()  # FKs to user (post_id is intentionally not a FK)
         db.query(PostMedia).delete()
         db.query(Post).delete()

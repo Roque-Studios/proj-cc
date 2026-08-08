@@ -47,6 +47,16 @@ def create_refresh_token(subject: str) -> str:
     return _create_token(subject, "refresh", settings.REFRESH_TOKEN_EXPIRE_MINUTES)
 
 
+def create_reset_token(subject: str) -> str:
+    """Issue a short-lived, single-purpose JWT for a password reset.
+
+    The ``type`` claim is ``"reset"`` (not ``"access"``/``"refresh"``) so a
+    stolen reset code can never be used as a session token, and the reset
+    endpoint rejects any other token type.
+    """
+    return _create_token(subject, "reset", settings.RESET_TOKEN_EXPIRE_MINUTES)
+
+
 def _create_token(subject: str, token_type: str, minutes: int) -> str:
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes)
     payload: dict[str, Any] = {

@@ -26,7 +26,12 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import PaidUnlock, Payment, Post, ProcessedWebhookEvent
-from ..payments import ChargeRequest, WebhookEvent, get_payment_provider
+from ..payments import (
+    ChargeRequest,
+    WebhookEvent,
+    WebhookEventType,
+    get_payment_provider,
+)
 
 logger = structlog.get_logger()
 
@@ -62,13 +67,15 @@ class BroadcastService:
     def get_unlock(self, subscriber_id: int, post_id: int) -> PaidUnlock | None:
         """The subscriber's *active* unlock row for a post, or None while locked.
 
-        A refunded row (``refunded_at`` set) is excluded: the broadcast is
-        locked again until the subscriber re-purchases.
+        A row is active only once **paid** (``paid_at`` set) and not refunded —
+        a pending row (created with a checkout url but no payment yet) is not
+        an unlock.
         """
         return self.db.scalar(
             select(PaidUnlock).where(
                 PaidUnlock.subscriber_id == subscriber_id,
                 PaidUnlock.post_id == post_id,
+                PaidUnlock.paid_at.is_not(None),
                 PaidUnlock.refunded_at.is_(None),
             )
         )
@@ -85,6 +92,7 @@ class BroadcastService:
             select(PaidUnlock.post_id).where(
                 PaidUnlock.subscriber_id == subscriber_id,
                 PaidUnlock.post_id.in_(post_ids),
+                PaidUnlock.paid_at.is_not(None),
                 PaidUnlock.refunded_at.is_(None),
             )
         ).all()
@@ -94,27 +102,32 @@ class BroadcastService:
     # Unlock flow
     # ------------------------------------------------------------------ #
 
-    def unlock(self, subscriber_id: int, post: Post) -> tuple[PaidUnlock, bool]:
-        """Charge the one-time price and record the unlock.
+    def create_unlock(
+        self,
+        subscriber_id: int,
+        post: Post,
+        *,
+        success_url: str | None = None,
+        cancel_url: str | None = None,
+    ) -> tuple[PaidUnlock, bool, str | None]:
+        """Create (or re-surface) a hosted payment link for a paid broadcast.
 
-        Returns ``(unlock, created)``: an active existing unlock is returned
-        unchanged with ``created=False`` — a repeat never charges again. A
-        **refunded** row is reactivated in place (a fresh charge replaces the
-        external ref, ``refunded_at`` cleared) with ``created=True``, so the
-        unique (subscriber, post) pair still holds exactly one row. Raises
-        :class:`BroadcastNotPaidError` for a regular post and
-        :class:`PaymentFailedError` when the charge fails (no unlock is granted
-        on a failed payment).
+        Returns ``(unlock, created, checkout_url)``:
 
-        Note: the provider is charged **before** the row commits, so two
-        perfectly concurrent first-time unlocks for the same (subscriber, post)
-        could both pass the check and both charge, with the unique constraint
-        resolving the row race afterwards (the loser returns the winner's row).
-        Concurrent **re-purchases** of a refunded row have the same exposure
-        (both charge, then both update the same row — the row keeps whichever
-        ref committed last). The charge metadata carries
-        ``subscriber_id``/``post_id``, so a reconciliation sweep could refund
-        the loser — acceptable for a solo platform.
+        - an **active** existing unlock returns ``(row, False, None)`` — the
+          subscriber already paid, no new checkout;
+        - a **pending** row (created earlier, payment not completed) returns
+          ``(row, False, row.checkout_url)`` — the same hosted link is
+          re-surfaced so the subscriber can continue paying;
+        - otherwise a pending row is created with the provider's hosted
+          one-time payment link and ``(row, True, checkout_url)`` is returned.
+
+        The payment is **not** charged synchronously — the subscriber pays on
+        the gateway's page and the ``payment.succeeded`` webhook activates the
+        unlock (:meth:`handle_paid`). ``success_url``/``cancel_url`` are the
+        gateway return urls (the subscriber's current page — where they land
+        after paying or backing out). Raises :class:`BroadcastNotPaidError`
+        for a regular post.
         """
         row = self.db.scalar(
             select(PaidUnlock).where(
@@ -122,13 +135,16 @@ class BroadcastService:
                 PaidUnlock.post_id == post.id,
             )
         )
-        if row is not None and row.refunded_at is None:
-            return row, False
+        if row is not None:
+            if row.refunded_at is None and row.paid_at is not None:
+                return row, False, None  # already paid
+            if row.refunded_at is None and row.checkout_url:
+                return row, False, row.checkout_url  # still pending
 
         if post.broadcast_price_cents is None:
             raise BroadcastNotPaidError("This post is not a paid broadcast")
 
-        result = self.provider.charge_one_time(
+        result = self.provider.create_one_time_link(
             ChargeRequest(
                 amount_cents=post.broadcast_price_cents,
                 currency="usd",
@@ -137,15 +153,17 @@ class BroadcastService:
                     "subscriber_id": str(subscriber_id),
                     "post_id": str(post.id),
                 },
+                success_url=success_url,
+                cancel_url=cancel_url,
             )
         )
-        if result.status != "succeeded":
-            raise PaymentFailedError(f"One-time payment failed: {result.status}")
 
         if row is not None:
             # Re-purchase after a refund: reactivate the same row in place.
             row.payment_provider = self.provider.name
             row.external_ref = result.external_ref
+            row.checkout_url = result.checkout_url
+            row.paid_at = None
             row.refunded_at = None
             unlock = row
         else:
@@ -154,46 +172,116 @@ class BroadcastService:
                 post_id=post.id,
                 payment_provider=self.provider.name,
                 external_ref=result.external_ref,
+                checkout_url=result.checkout_url,
             )
             self.db.add(unlock)
-        # Revenue ledger: every successful one-time charge (first unlock or
-        # re-purchase) records a completed payment, in the same transaction —
-        # the unique-constraint loser's rollback records nothing.
-        self.db.add(
-            Payment(
-                creator_id=post.creator_id,
-                subscriber_id=subscriber_id,
-                kind="unlock",
-                amount_cents=post.broadcast_price_cents,
-                status="completed",
-                payment_provider=self.provider.name,
-                external_ref=result.external_ref,
-                post_id=post.id,
-            )
-        )
         try:
             self.db.commit()
         except IntegrityError:
-            # A concurrent first-time unlock for the same (subscriber, post)
-            # won the row race (unique constraint) — return their row. The
-            # losing request's gateway charge was already made; the charge
-            # metadata carries the (subscriber, post) pair so a reconciliation
-            # sweep can match and refund it if ever needed.
+            # A concurrent first-time unlock won the row race (unique
+            # constraint) — return their row (its checkout url if still
+            # pending).
             self.db.rollback()
-            existing = self.get_unlock(subscriber_id, post.id)
+            existing = self.db.scalar(
+                select(PaidUnlock).where(
+                    PaidUnlock.subscriber_id == subscriber_id,
+                    PaidUnlock.post_id == post.id,
+                )
+            )
             if existing is not None:
-                return existing, False
+                return existing, False, existing.checkout_url
             raise
         self.db.refresh(unlock)
         logger.info(
-            "paid_unlock_created",
+            "paid_unlock_checkout_created",
             subscriber_id=subscriber_id,
             post_id=post.id,
             amount_cents=post.broadcast_price_cents,
             external_ref=result.external_ref,
             reactivated=(row is not None),
         )
-        return unlock, True
+        return unlock, True, result.checkout_url
+
+    def find_by_ref(self, external_ref: str | None) -> PaidUnlock | None:
+        """The unlock row a payment event refers to (any state, not refunded).
+
+        Used by the webhook dispatcher to route one-time payment events to the
+        broadcast flow instead of the subscription flow (a payment-link event's
+        external ref is the link id stored on the pending unlock).
+        """
+        if not external_ref:
+            return None
+        return self.db.scalar(
+            select(PaidUnlock).where(
+                PaidUnlock.external_ref == external_ref,
+                PaidUnlock.payment_provider == self.provider.name,
+                PaidUnlock.refunded_at.is_(None),
+            )
+        )
+
+    def handle_paid(self, event: WebhookEvent) -> WebhookEvent:
+        """Activate the unlock a completed payment webhook refers to.
+
+        Finds the ``PaidUnlock`` by the event's external ref (the hosted link
+        id stored at checkout creation), stamps ``paid_at``, clears the
+        checkout url and records the completed ``Payment`` in the revenue
+        ledger — all in one transaction with the idempotency marker. A
+        ``payment.failed`` event for a pending unlock is a no-op (the row stays
+        pending; the subscriber can retry the same checkout link).
+        """
+        if event.event_type != WebhookEventType.payment_succeeded:
+            # A failed payment leaves the unlock pending (retryable) — ack
+            # without state change.
+            return self._mark_processed(event)
+
+        unlock = self.find_by_ref(event.external_ref)
+        if unlock is None:
+            logger.debug(
+                "paid webhook: no matching paid unlock",
+                provider=event.provider,
+                external_ref=event.external_ref,
+            )
+            return event
+
+        already_paid = unlock.paid_at is not None
+        if not already_paid:
+            unlock.paid_at = datetime.now(timezone.utc)
+            unlock.checkout_url = None
+            self.db.add(
+                Payment(
+                    creator_id=unlock.post.creator_id if unlock.post is not None else None,
+                    subscriber_id=unlock.subscriber_id,
+                    kind="unlock",
+                    amount_cents=(
+                        unlock.post.broadcast_price_cents
+                        if unlock.post is not None and unlock.post.broadcast_price_cents is not None
+                        else 0
+                    ),
+                    status="completed",
+                    payment_provider=event.provider,
+                    external_ref=event.external_ref or unlock.external_ref,
+                    post_id=unlock.post_id,
+                )
+            )
+        return self._mark_processed(event)
+
+    def _mark_processed(self, event: WebhookEvent) -> WebhookEvent:
+        """Ack an event through the idempotency ledger (one transaction)."""
+        if event.id is None:
+            return event
+        if self._is_processed(event.provider, event.id):
+            event.duplicate = True
+            return event
+        self.db.add(
+            ProcessedWebhookEvent(provider=event.provider, event_id=event.id)
+        )
+        try:
+            self.db.commit()
+        except IntegrityError:
+            # A concurrent delivery of the same event id committed first.
+            self.db.rollback()
+            event.duplicate = True
+        return event
 
     # ------------------------------------------------------------------ #
     # Refund webhooks (access revocation)
@@ -223,6 +311,7 @@ class BroadcastService:
             return event
 
         unlock.refunded_at = datetime.now(timezone.utc)
+        unlock.paid_at = None
         # Revenue ledger: mark the matching charge refunded so it drops out of
         # the revenue totals. Ref first (the exact charge), then the metadata
         # fallback for providers whose refunds carry a foreign id (PayPal
@@ -288,6 +377,9 @@ class BroadcastService:
                 select(PaidUnlock).where(
                     PaidUnlock.external_ref == event.external_ref,
                     PaidUnlock.payment_provider == event.provider,
+                    # A refund refers to a charge — only *paid* rows can be
+                    # refunded (a pending checkout refund is not a thing).
+                    PaidUnlock.paid_at.is_not(None),
                 )
             )
             if unlock is not None:

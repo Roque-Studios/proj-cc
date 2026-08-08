@@ -20,7 +20,8 @@ from PIL import Image
 from sqlalchemy import select
 
 from app.models import PaidUnlock, Post, Subscription, SubscriptionStatus, User, UserRole
-from app.payments.base import ChargeResult, WebhookEvent, WebhookEventType
+from app.payments import PaymentProviderError
+from app.payments.base import WebhookEvent, WebhookEventType
 from app.payments.mock import MockPaymentProvider
 from app.services.broadcasts import (
     BroadcastNotPaidError,
@@ -107,6 +108,16 @@ def _user_id(db, email: str) -> int:
 
 def _media_url(post: dict) -> str:
     return f"/content/{post['id']}/media?media_id={post['media'][0]['id']}"
+
+
+def _pay_webhook(client, external_ref: str, event_id: str = "evt_paid_default_1"):
+    """Simulate the hosted payment completing: a signed ``payment.succeeded``."""
+    body = MockPaymentProvider.make_webhook_body(
+        "payment.succeeded", external_ref=external_ref, event_id=event_id
+    )
+    return client.post(
+        "/webhooks/mock", data=body, headers=MockPaymentProvider.sign_body(body)
+    )
 
 
 def _make_fan_follower(client, db, email: str = "fan@example.com") -> str:
@@ -254,16 +265,27 @@ def test_subscriber_unlocks_and_gets_full_access(client, db_session):
     # Locked before payment…
     assert client.get(_media_url(post), headers=_bearer(fan_token)).status_code == 403
 
-    # …unlock with the one-time payment…
+    # …unlock creates the **hosted checkout** (no synchronous charge)…
     unlock = client.post(f"/content/{post['id']}/unlock", headers=_bearer(fan_token))
     assert unlock.status_code == 201  # first unlock is a creation
     body = unlock.json()
     assert body["already_unlocked"] is False
     assert body["post_id"] == post["id"]
     assert body["broadcast_price_cents"] == 500
+    assert body["checkout_url"].startswith("https://mock.checkout/")
     assert body["unlock"]["subscriber_id"] == fan_id
     assert body["unlock"]["payment_provider"] == "mock"
     assert body["unlock"]["external_ref"].startswith("ch_mock_")
+    charge_ref = body["unlock"]["external_ref"]
+
+    # Still locked until the gateway payment completes (the webhook activates
+    # the unlock) — the subscriber is on the hosted page, not served yet.
+    assert client.get(_media_url(post), headers=_bearer(fan_token)).status_code == 403
+
+    # The payment completes on the gateway's page -> signed webhook -> unlock.
+    paid = _pay_webhook(client, charge_ref, event_id="evt_paid_integration_1")
+    assert paid.status_code == 200
+    assert paid.json()["event_type"] == "payment.succeeded"
 
     # …full media access now, watermarked never the original.
     served = client.get(_media_url(post), headers=_bearer(fan_token))
@@ -279,7 +301,7 @@ def test_subscriber_unlocks_and_gets_full_access(client, db_session):
 
 
 def test_unlock_is_idempotent_returns_existing_row(client, db_session):
-    """A repeat unlock returns the original row (201 then 200, one row total)."""
+    """A pending repeat re-surfaces the same checkout; a paid repeat is 200."""
     creator_token = _make_creator(client)
     post = _upload_post(client, creator_token, price_cents=500)
     fan_token, _ = _make_fan_follower(client, db_session)
@@ -287,17 +309,29 @@ def test_unlock_is_idempotent_returns_existing_row(client, db_session):
     first = client.post(f"/content/{post['id']}/unlock", headers=_bearer(fan_token))
     assert first.status_code == 201
     assert first.json()["already_unlocked"] is False
+    assert first.json()["checkout_url"] is not None
 
-    second = client.post(f"/content/{post['id']}/unlock", headers=_bearer(fan_token))
-    assert second.status_code == 200
-    assert second.json()["already_unlocked"] is True
-    assert second.json()["unlock"]["id"] == first.json()["unlock"]["id"]
+    # Still pending: the same row and the same checkout url, still one row.
+    again = client.post(f"/content/{post['id']}/unlock", headers=_bearer(fan_token))
+    assert again.status_code == 201
+    assert again.json()["already_unlocked"] is False
+    assert again.json()["unlock"]["id"] == first.json()["unlock"]["id"]
+    assert again.json()["checkout_url"] == first.json()["checkout_url"]
 
     with db_session as db:
         row_ids = db.scalars(
             select(PaidUnlock.id).where(PaidUnlock.post_id == post["id"])
         ).all()
     assert row_ids == [first.json()["unlock"]["id"]]  # exactly one row, unchanged
+
+    # After the payment webhook a repeat unlock reports already_unlocked (200).
+    assert _pay_webhook(
+        client, first.json()["unlock"]["external_ref"], event_id="evt_paid_repeat_1"
+    ).status_code == 200
+    paid_again = client.post(f"/content/{post['id']}/unlock", headers=_bearer(fan_token))
+    assert paid_again.status_code == 200
+    assert paid_again.json()["already_unlocked"] is True
+    assert paid_again.json()["checkout_url"] is None
 
 
 def test_unlock_requires_active_subscription(client, db_session):
@@ -372,7 +406,9 @@ def test_feed_mixes_locked_and_unlocked_broadcasts(client, db_session):
     paid = _upload_post(client, creator_token, caption="Will unlock", price_cents=700)
     fan_token, _ = _make_fan_follower(client, db_session)
 
-    client.post(f"/content/{paid['id']}/unlock", headers=_bearer(fan_token))
+    unlock = client.post(f"/content/{paid['id']}/unlock", headers=_bearer(fan_token))
+    assert unlock.status_code == 201
+    _pay_webhook(client, unlock.json()["unlock"]["external_ref"], event_id="evt_paid_mix_1")
 
     feed = client.get(f"/creators/{free['creator_id']}/posts", headers=_bearer(fan_token))
     items = {p["caption"]: p for p in feed.json()["posts"]}
@@ -400,34 +436,42 @@ def test_service_unlock_records_charge_once(db_session):
     provider = MockPaymentProvider()
     service = BroadcastService(db, provider=provider)
 
-    unlock, created = service.unlock(subscriber.id, post)
+    unlock, created, checkout_url = service.create_unlock(subscriber.id, post)
     assert created is True
     assert unlock.subscriber_id == subscriber.id
     assert unlock.post_id == post.id
     assert unlock.payment_provider == "mock"
     assert unlock.external_ref.startswith("ch_mock_")
+    assert checkout_url.startswith("https://mock.checkout/")
+    # Pending until the payment webhook — no access yet.
+    assert service.is_unlocked(subscriber.id, post.id) is False
+
+    # The gateway payment completes -> handle_paid activates the unlock.
+    event = service.handle_paid(
+        WebhookEvent(
+            provider="mock",
+            event_type=WebhookEventType.payment_succeeded,
+            external_ref=unlock.external_ref,
+            id="evt_paid_unit_1",
+        )
+    )
+    assert event.duplicate is False
     assert service.is_unlocked(subscriber.id, post.id) is True
     assert service.unlocked_post_ids(subscriber.id, [post.id]) == {post.id}
 
-    # A repeat unlock never charges twice.
-    again, created2 = service.unlock(subscriber.id, post)
+    # A repeat unlock never creates another link.
+    again, created2, _ = service.create_unlock(subscriber.id, post)
     assert created2 is False
     assert again.id == unlock.id
-    assert len(provider.charges) == 1
+    assert len(provider.one_time_links) == 1
 
 
 def test_service_failed_charge_grants_no_unlock(db_session):
     class _FailingProvider:
         name = "mock"
 
-        def charge_one_time(self, request):
-            return ChargeResult(
-                external_ref="ch_failed_1",
-                status="failed",
-                amount_cents=request.amount_cents,
-                currency=request.currency,
-                raw={},
-            )
+        def create_one_time_link(self, request):
+            raise PaymentProviderError("gateway down")
 
     db = db_session
     creator = _create_creator(db)
@@ -435,8 +479,8 @@ def test_service_failed_charge_grants_no_unlock(db_session):
     subscriber = _create_subscriber(db)
     service = BroadcastService(db, provider=_FailingProvider())
 
-    with pytest.raises(PaymentFailedError):
-        service.unlock(subscriber.id, post)
+    with pytest.raises(PaymentProviderError):
+        service.create_unlock(subscriber.id, post)
     assert service.is_unlocked(subscriber.id, post.id) is False
 
 
@@ -448,7 +492,7 @@ def test_service_unlock_regular_post_raises(db_session):
     service = BroadcastService(db, provider=MockPaymentProvider())
 
     with pytest.raises(BroadcastNotPaidError):
-        service.unlock(subscriber.id, post)
+        service.create_unlock(subscriber.id, post)
 
 
 # --------------------------------------------------------------------------- #
@@ -464,8 +508,16 @@ def test_service_refund_revokes_and_repurchase_reactivates(db_session):
     provider = MockPaymentProvider()
     service = BroadcastService(db, provider=provider)
 
-    unlock, created = service.unlock(subscriber.id, post)
+    unlock, created, _ = service.create_unlock(subscriber.id, post)
     assert created is True
+    service.handle_paid(
+        WebhookEvent(
+            provider="mock",
+            event_type=WebhookEventType.payment_succeeded,
+            external_ref=unlock.external_ref,
+            id="evt_paid_refund_unit_1",
+        )
+    )
     assert service.is_unlocked(subscriber.id, post.id) is True
     first_ref = unlock.external_ref
 
@@ -483,17 +535,25 @@ def test_service_refund_revokes_and_repurchase_reactivates(db_session):
     assert unlock.refunded_at is not None
     assert service.is_unlocked(subscriber.id, post.id) is False
     assert service.unlocked_post_ids(subscriber.id, [post.id]) == set()
-    assert len(provider.charges) == 1
+    assert len(provider.one_time_links) == 1
 
-    # Re-purchase: a fresh charge, the SAME row reactivated (still one row).
-    again, created2 = service.unlock(subscriber.id, post)
+    # Re-purchase: a fresh link, the SAME row reactivated (still one row).
+    again, created2, _ = service.create_unlock(subscriber.id, post)
     assert created2 is True
     assert again.id == unlock.id
     db.refresh(again)
     assert again.refunded_at is None
-    assert again.external_ref != first_ref  # fresh charge went through
+    assert again.external_ref != first_ref  # fresh link went through
+    service.handle_paid(
+        WebhookEvent(
+            provider="mock",
+            event_type=WebhookEventType.payment_succeeded,
+            external_ref=again.external_ref,
+            id="evt_paid_repurchase_unit_1",
+        )
+    )
     assert service.is_unlocked(subscriber.id, post.id) is True
-    assert len(provider.charges) == 2
+    assert len(provider.one_time_links) == 2
     with db:
         rows = db.scalars(
             select(PaidUnlock).where(PaidUnlock.post_id == post.id)
@@ -509,8 +569,16 @@ def test_service_refund_matches_by_metadata_fallback(db_session):
     subscriber = _create_subscriber(db)
     service = BroadcastService(db, provider=MockPaymentProvider())
 
-    unlock, created = service.unlock(subscriber.id, post)
+    unlock, created, _ = service.create_unlock(subscriber.id, post)
     assert created is True
+    service.handle_paid(
+        WebhookEvent(
+            provider="mock",
+            event_type=WebhookEventType.payment_succeeded,
+            external_ref=unlock.external_ref,
+            id="evt_paid_meta_unit_1",
+        )
+    )
 
     event = service.handle_refunded(
         WebhookEvent(
@@ -538,7 +606,15 @@ def test_service_refund_redelivery_is_duplicate(db_session):
     subscriber = _create_subscriber(db)
     service = BroadcastService(db, provider=MockPaymentProvider())
 
-    unlock, _ = service.unlock(subscriber.id, post)
+    unlock, _, _ = service.create_unlock(subscriber.id, post)
+    service.handle_paid(
+        WebhookEvent(
+            provider="mock",
+            event_type=WebhookEventType.payment_succeeded,
+            external_ref=unlock.external_ref,
+            id="evt_paid_refund_dup_unit_1",
+        )
+    )
     ref = unlock.external_ref
 
     def _event() -> WebhookEvent:
@@ -582,22 +658,16 @@ def test_service_refund_unknown_charge_is_noop(db_session):
 # --------------------------------------------------------------------------- #
 
 def test_integration_failed_charge_grants_no_unlock(client, db_session, monkeypatch):
-    """A failed one-time charge creates no PaidUnlock and grants no access."""
+    """A failed hosted-link creation creates no PaidUnlock and grants no access."""
 
     class _FailingProvider:
         name = "mock"
 
-        def charge_one_time(self, request):
-            return ChargeResult(
-                external_ref="ch_fail_1",
-                status="failed",
-                amount_cents=request.amount_cents,
-                currency=request.currency,
-                raw={},
-            )
+        def create_one_time_link(self, request):
+            raise PaymentProviderError("gateway down")
 
     monkeypatch.setattr(
-        "app.services.broadcasts.get_payment_provider",
+        "app.services.gateways.get_payment_provider",
         lambda settings: _FailingProvider(),
     )
     creator_token = _make_creator(client)
@@ -605,7 +675,7 @@ def test_integration_failed_charge_grants_no_unlock(client, db_session, monkeypa
     fan_token, _ = _make_fan_follower(client, db_session)
 
     resp = client.post(f"/content/{post['id']}/unlock", headers=_bearer(fan_token))
-    assert resp.status_code == 402  # payment required
+    assert resp.status_code == 400  # could not create the payment link
     assert client.get(_media_url(post), headers=_bearer(fan_token)).status_code == 403
     with db_session as db:
         assert db.scalar(
@@ -637,10 +707,13 @@ def test_refund_webhook_revokes_unlock_access(client, db_session):
     post_id = post["id"]
     creator_id = post["creator_id"]
 
-    # Success: unlock grants full media access and creates the PaidUnlock row.
+    # Success: hosted checkout -> payment webhook -> full access + PaidUnlock.
     unlock = client.post(f"/content/{post_id}/unlock", headers=_bearer(fan_token))
     assert unlock.status_code == 201
     charge_ref = unlock.json()["unlock"]["external_ref"]
+    assert _pay_webhook(
+        client, charge_ref, event_id="evt_paid_refund_e2e_1"
+    ).status_code == 200
     assert client.get(_media_url(post), headers=_bearer(fan_token)).status_code == 200
     with db_session as db:
         row = db.scalar(select(PaidUnlock).where(PaidUnlock.post_id == post_id))
@@ -677,6 +750,7 @@ def test_refund_webhook_redelivery_is_duplicate(client, db_session):
 
     unlock = client.post(f"/content/{post_id}/unlock", headers=_bearer(fan_token))
     charge_ref = unlock.json()["unlock"]["external_ref"]
+    assert _pay_webhook(client, charge_ref, event_id="evt_paid_refund_retry_1").status_code == 200
     body, headers = _refund_webhook(
         charge_ref,
         {"subscriber_id": str(fan_id), "post_id": str(post_id)},
@@ -699,6 +773,7 @@ def test_subscriber_repurchases_after_refund(client, db_session):
 
     unlock = client.post(f"/content/{post_id}/unlock", headers=_bearer(fan_token))
     charge_ref = unlock.json()["unlock"]["external_ref"]
+    assert _pay_webhook(client, charge_ref, event_id="evt_paid_repurchase_1").status_code == 200
     body, headers = _refund_webhook(
         charge_ref,
         {"subscriber_id": str(fan_id), "post_id": str(post_id)},
@@ -707,11 +782,16 @@ def test_subscriber_repurchases_after_refund(client, db_session):
     assert client.post("/webhooks/mock", data=body, headers=headers).status_code == 200
     assert client.get(_media_url(post), headers=_bearer(fan_token)).status_code == 403
 
-    # Re-purchase: 201 (a fresh charge), access restored, exactly one row.
+    # Re-purchase: 201 (a fresh hosted link), paid, access restored, one row.
     again = client.post(f"/content/{post_id}/unlock", headers=_bearer(fan_token))
     assert again.status_code == 201
     assert again.json()["already_unlocked"] is False
     assert again.json()["unlock"]["refunded_at"] is None
+    assert _pay_webhook(
+        client,
+        again.json()["unlock"]["external_ref"],
+        event_id="evt_paid_repurchase_2",
+    ).status_code == 200
     assert client.get(_media_url(post), headers=_bearer(fan_token)).status_code == 200
     with db_session as db:
         rows = db.scalars(

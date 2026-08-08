@@ -276,10 +276,13 @@ class PaidUnlock(Base):
     """A subscriber's one-time paid unlock of a paid broadcast (post).
 
     One row per (subscriber, broadcast): unlocking is a one-time purchase, so
-    the unique pair is enforced. The payment is a one-time charge through the
-    payment abstraction (``PaymentProvider.charge_one_time``) — entirely
-    separate from the monthly subscription charge — and the provider ref is
-    kept for reconciliation.
+    the unique pair is enforced. The payment goes through the same **hosted
+    checkout + webhook** pattern as subscriptions (``PaymentProvider.
+    create_one_time_link``): the subscriber pays on the gateway's page and the
+    ``payment.succeeded`` webhook activates the unlock (``paid_at`` set,
+    ``checkout_url`` cleared). A row created without a payment yet is
+    **pending** (``paid_at`` NULL) and simply re-surfaces its ``checkout_url``
+    on repeat unlock attempts.
 
     ``refunded_at`` is set when the gateway refunds the charge (a verified
     ``payment.refunded`` webhook): access is revoked until the subscriber
@@ -311,6 +314,11 @@ class PaidUnlock(Base):
     )
     payment_provider = Column(String(50), nullable=True)
     external_ref = Column(String(255), nullable=True)
+    # The hosted payment link the subscriber pays on (NULL once paid — the
+    # webhook clears it; also NULL for pre-hosted-flow rows).
+    checkout_url = Column(String(500), nullable=True)
+    # When the payment webhook activated the unlock (NULL = pending payment).
+    paid_at = Column(DateTime(timezone=True), nullable=True)
     # Set when the gateway refunded this charge — access is revoked until the
     # subscriber re-purchases (NULL while the unlock is in force).
     refunded_at = Column(DateTime(timezone=True), nullable=True)
@@ -354,6 +362,8 @@ class Payment(Base):
     external_ref = Column(String(255), index=True, nullable=True)
     # For unlocks; intentionally NOT a FK so revenue survives post deletion.
     post_id = Column(Integer, nullable=True)
+    # For paid-message unlocks (same no-FK rationale as ``post_id``).
+    message_id = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
@@ -484,11 +494,91 @@ class Message(Base):
         nullable=False,
     )
     body = Column(Text, nullable=False)
+    # One-time unlock price in cents for a **paid message** (creator sends
+    # exclusive media the recipient pays once to view). NULL = a regular DM.
+    price_cents = Column(Integer, nullable=True)
     # Set once the recipient has seen the message (nullable until then).
     read_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     conversation = relationship("Conversation", back_populates="messages")
+    media = relationship(
+        "MessageMedia",
+        back_populates="message",
+        cascade="all, delete-orphan",
+        order_by="MessageMedia.id",
+    )
+
+
+class MessageMedia(Base):
+    """A media file attached to a DM message (validated image upload).
+
+    Clients reference media through the auth-gated, watermarked
+    ``/messages/{message_id}/media?media_id={id}`` endpoint (participants only;
+    paid messages stay blurred/locked until the one-time unlock). The raw
+    storage key is never exposed — exactly like ``PostMedia``.
+    """
+
+    __tablename__ = "message_media"
+
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(
+        Integer,
+        ForeignKey("message.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    media_type = Column(String(50), nullable=False)
+    storage_key = Column(String(500), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    message = relationship("Message", back_populates="media")
+
+    @property
+    def media_url(self) -> str:
+        """Public url for this message media (auth + watermark on fetch)."""
+        return f"/messages/{self.message_id}/media?media_id={self.id}"
+
+
+class PaidMessageUnlock(Base):
+    """A subscriber's one-time paid unlock of a paid DM message.
+
+    Same lifecycle as ``PaidUnlock`` (hosted checkout + webhook activation):
+    one row per (subscriber, message); ``paid_at`` marks the activated
+    payment, ``checkout_url`` the hosted link before payment, ``refunded_at``
+    a gateway refund (access revoked until re-purchase).
+    """
+
+    __tablename__ = "paid_message_unlock"
+    __table_args__ = (
+        UniqueConstraint(
+            "subscriber_id",
+            "message_id",
+            name="uq_paid_message_unlock_subscriber_message",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    subscriber_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    message_id = Column(
+        Integer,
+        ForeignKey("message.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    payment_provider = Column(String(50), nullable=True)
+    external_ref = Column(String(255), nullable=True)
+    checkout_url = Column(String(500), nullable=True)
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+    refunded_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    message = relationship("Message")
 
 
 class CreatorProfile(Base):

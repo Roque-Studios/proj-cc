@@ -541,6 +541,14 @@ landing page's "Log in to subscribe" CTA, the subscriber-feed prompt and the
 anonymous checkout redirect all point here with `?next=` set, so a follower
 signs in and lands right back where they were.
 
+**Forgot your password?** Both sign-in pages link to the same reset flow
+(`roque-password-reset`): `POST /auth/forgot-password` hands back a short-lived
+reset code (emailed via SMTP when `SMTP_HOST` is set, otherwise returned as
+`dev_token` so the flow works in dev), then `POST /auth/reset-password` sets the
+new one. Reset codes are single-purpose JWTs (`type: "reset"`, 30 minutes) — an
+access or refresh token can never be used as a reset code, and the endpoint
+never reveals whether an email has an account.
+
 In the Vite dev server the clean URLs fall back to the landing page (same as
 `/checkout` / `/feed` / `/chat`) — use `/login.html` and `/admin.html`
 directly in dev; nginx maps the clean `/login` / `/admin` URLs in production.

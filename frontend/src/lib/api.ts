@@ -289,6 +289,8 @@ export interface SubscribeStatus {
 export interface UserSummary {
   id: number
   username: string | null
+  /** Creator avatar url (subscribers have none — the UI shows initials). */
+  avatar_url?: string | null
 }
 
 export interface ChatMessage {
@@ -297,6 +299,9 @@ export interface ChatMessage {
   sender_id: number
   recipient_id: number
   body: string
+  price_cents: number | null
+  media: { id: number; message_id: number; media_type: string; media_url: string }[]
+  unlocked: boolean | null
   read_at: string | null
   created_at: string
 }
@@ -354,6 +359,20 @@ export const api = {
         current_password: currentPassword,
         new_password: newPassword,
       }),
+    })
+  },
+
+  forgotPassword(email: string): Promise<{ sent: boolean; dev_token?: string | null }> {
+    return request<{ sent: boolean; dev_token?: string | null }>('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    })
+  },
+
+  resetPassword(token: string, newPassword: string): Promise<void> {
+    return request<void>('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, new_password: newPassword }),
     })
   },
 
@@ -551,10 +570,14 @@ export const api = {
     return request<MessagesStatus>(`/messages/status?recipient_id=${recipientId}`)
   },
 
-  unlockBroadcast(postId: number): Promise<{
+  unlockBroadcast(
+    postId: number,
+    returnUrls?: { success_url?: string; cancel_url?: string },
+  ): Promise<{
     post_id: number
     broadcast_price_cents: number
     already_unlocked: boolean
+    checkout_url: string | null
     unlock: {
       id: number
       subscriber_id: number
@@ -565,6 +588,43 @@ export const api = {
       created_at: string
     }
   }> {
-    return request(`/content/${postId}/unlock`, { method: 'POST' })
+    const q = new URLSearchParams()
+    if (returnUrls?.success_url) q.set('success_url', returnUrls.success_url)
+    if (returnUrls?.cancel_url) q.set('cancel_url', returnUrls.cancel_url)
+    const suffix = q.toString() ? `?${q.toString()}` : ''
+    return request(`/content/${postId}/unlock${suffix}`, { method: 'POST' })
+  },
+
+  sendMessageWithMedia(
+    recipientId: number,
+    body: string,
+    files: File[],
+    priceCents?: number | null,
+  ): Promise<ChatMessage> {
+    const form = new FormData()
+    form.set('recipient_id', String(recipientId))
+    form.set('body', body)
+    if (priceCents != null) form.set('price_cents', String(priceCents))
+    for (const file of files) form.append('files', file)
+    return request<ChatMessage>('/messages/media', {
+      method: 'POST',
+      body: form,
+    })
+  },
+
+  unlockMessage(
+    messageId: number,
+    returnUrls?: { success_url?: string; cancel_url?: string },
+  ): Promise<{
+    message_id: number
+    price_cents: number
+    already_unlocked: boolean
+    checkout_url: string | null
+  }> {
+    const q = new URLSearchParams()
+    if (returnUrls?.success_url) q.set('success_url', returnUrls.success_url)
+    if (returnUrls?.cancel_url) q.set('cancel_url', returnUrls.cancel_url)
+    const suffix = q.toString() ? `?${q.toString()}` : ''
+    return request(`/messages/${messageId}/unlock${suffix}`, { method: 'POST' })
   },
 }

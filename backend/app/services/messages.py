@@ -29,6 +29,7 @@ from ..models import (
     Conversation,
     CreatorProfile,
     Message,
+    MessageMedia,
     User,
     UserRole,
 )
@@ -50,14 +51,25 @@ class MessageService:
     # Sending
     # ------------------------------------------------------------------ #
 
-    def send(self, sender: User, recipient_id: int, body: str) -> Message:
+    def send(
+        self,
+        sender: User,
+        recipient_id: int,
+        body: str,
+        *,
+        price_cents: int | None = None,
+        media: list[tuple[str, str]] = (),  # (storage_key, media_type)
+    ) -> Message:
         """Deliver a message, applying the DM policy gate.
 
-        Returns the persisted ``Message`` (in its conversation — created on
-        first contact, reused on every subsequent message).
+        ``price_cents`` marks the message **paid** (one-time unlock); ``media``
+        is a list of ``(storage_key, media_type)`` uploads already persisted
+        to storage (the router saves them; a failed commit leaves the caller
+        to clean up). Returns the persisted ``Message`` (in its conversation —
+        created on first contact, reused on every subsequent message).
         """
         body = body.strip()
-        if not body:
+        if not body and not media:
             raise ValueError("Message body must not be empty")
 
         recipient = self.db.get(User, recipient_id)
@@ -65,6 +77,11 @@ class MessageService:
             raise UnknownRecipientError("Recipient not found")
         if recipient.id == sender.id:
             raise ValueError("You cannot message yourself")
+        # Only a creator may price a message — subscribers can't sell content.
+        # Enforced here (the service) so every send path (JSON, multipart and
+        # any future caller) is covered, not just one endpoint.
+        if price_cents is not None and sender.role != UserRole.creator:
+            raise ValueError("Only creators can send paid content")
 
         if sender.role == UserRole.creator:
             # The creator may always reach a subscriber — this is what creates
@@ -122,8 +139,18 @@ class MessageService:
             sender_id=sender.id,
             recipient_id=recipient.id,
             body=body,
+            price_cents=price_cents,
         )
         self.db.add(message)
+        self.db.flush()  # assign message.id for the media rows
+        for storage_key, media_type in media:
+            self.db.add(
+                MessageMedia(
+                    message_id=message.id,
+                    media_type=media_type,
+                    storage_key=storage_key,
+                )
+            )
         # Touch the thread so the inbox orders by recency.
         conversation.updated_at = datetime.now(timezone.utc)
         self.db.commit()

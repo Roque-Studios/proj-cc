@@ -5,6 +5,7 @@ import './creator-login.ts'
 import './creator-gateway-settings.ts'
 import './creator-content.ts'
 import './creator-subscribers.ts'
+import './chat.ts'
 import '../components/layouts/tabs.ts'
 import { api, clearTokens, getAccessToken } from '../lib/api'
 
@@ -80,6 +81,13 @@ export class CreatorSettingsApp extends LitElement {
             @aero-logout="${this._onLogout}"
             @aero-unauthorized="${this._onLogout}"
           ></roque-subscribers-manager>
+          <roque-dm-chat
+            embedded
+            slot="panel"
+            label="Conversations"
+            @aero-logout="${this._onLogout}"
+            @aero-unauthorized="${this._onLogout}"
+          ></roque-dm-chat>
         </roque-tabs>`
       : html`<roque-creator-login @aero-login-success="${this._onLogin}"></roque-creator-login>`
   }

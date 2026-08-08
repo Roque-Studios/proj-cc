@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.31.0] - 2026-08-07
+### Added
+- **Password reset flow for every role**: both sign-in pages (`/login` for subscribers, `/admin` for creators) gain a "Forgot password?" link opening a two-step flow — enter the account email to request a reset code, then enter the code + a new password. Backed by `POST /auth/forgot-password` (never reveals whether an account exists; emails the code via SMTP when configured, returns it as `dev_token` in dev/mock setups) and `POST /auth/reset-password` (short-lived, single-purpose `type: "reset"` JWT — an access or refresh token can never be replayed; wrong/expired codes are answered identically). The reset code is a new `roque-password-reset` component shared by both login pages
+- Removed the creator-only hint paragraph from the admin sign-in page ("This is the creator (admin) sign-in…" / seed tip) — both roles now share the same self-service sign-in
+
+## [0.30.0] - 2026-08-07
+### Added
+- **Paid broadcasts now use a real hosted checkout** — the one-time unlock no longer needs a client-side card charge (which the UI never collected, so paid content stayed locked forever). `POST /content/{id}/unlock` now returns a **hosted payment link** (`checkout_url`) on the creator's enabled gateway — Wompi payment link / Stripe Checkout Session / PayPal order — and the `payment.succeeded` webhook activates the unlock (records the revenue ledger row); `payment.refunded` revokes access until re-purchase. The feed's Unlock button sends the subscriber to the checkout and the reloaded feed shows the broadcast unlocked on return
+- **One-time paid content in DMs**: creators can now send **paid image messages** — a `Photo` picker + `Paid` toggle + price in the chat composer (creators only). A paid message renders as a locked placeholder with an **Unlock $X** button for the recipient; unlocking opens the same hosted checkout, and the paid message webhook (`POST /api/webhooks/...`) activates access. New endpoints: `POST /messages/media` (multipart upload), `GET /messages/{id}/media` (participants-only, watermarked, locked until paid) and `POST /messages/{id}/unlock`; conversation history reports each message's `unlocked` state
+- **`payment.message_id`** column so paid-DM unlocks also land in the revenue ledger (survives message deletion, same no-FK rule as `post_id`)
+
+### Changed
+- **Unlock checkouts use the creator's own gateway**: `resolve_unlock_provider` prefers the creator's single enabled+configured gateway (same account + webhook secret as their subscription checkout, so payment events reconcile) with a settings fallback for the zero-config mock/dev path
+- **Webhook dispatch** now routes one-time payment/refund events to the broadcast or paid-message unlock flow (by stored ref) before falling through to the subscription reconciler
+- The **paid-content guard lives in `MessageService.send`** so every send path (JSON, multipart) rejects a subscriber trying to set a price
+
+### Fixed
+- **Paid amount box no longer disappears**: the price input previously unmounted the moment its value was emptied (the string doubled as the "is paid" flag), making it impossible to type a new amount — the composer now keeps a separate paid-enabled toggle, and sending paid content requires both a price and an attached photo (clear toasts otherwise)
+- **Compact chat bubbles**: bubbles now use `width: fit-content` (they were stretching to 70% width as empty blocks, leaving text and time floating in a giant box) with `overflow-wrap: anywhere` so long text wraps inside the bubble
+- **Creator's own feed shows their paid broadcasts unlocked**: `GET /creators/{id}/posts` now treats the creator viewing their own feed like a follower — their paid broadcasts come back `unlocked: true` with real media urls instead of a locked teaser
+
+## [0.29.0] - 2026-08-07
+### Added
+- **Conversations tab in the creator dashboard** (`/admin`): the creator's DM inbox is now embedded as a new **Conversations** tab (the same `roque-dm-chat` UI, in `embedded` mode — no redundant site menu/back button, sized to the tab). Creators can read and reply to subscriber threads right from the admin
+- **Creator avatars in chat**: `GET /conversations` now includes the other party's `avatar_url` (from the creator profile) — the chat inbox and thread header show the creator's real picture instead of a blank initials circle. New-conversation compose mode also receives the avatar via `?avatar=` from the Message buttons
+
+### Changed
+- **Compact message bubbles**: reduced padding (8/12 → 4/9), max-width 78 → 70%, font 13 → 12.5px, bubble radius 12 → 10px, tighter thread gap (8 → 5px) and slimmer timestamps — messages read like a chat now instead of large cards
+- **Mobile-first `/chat`**: the chat page gained the shared **hamburger menu** (`roque-site-menu` — Messages / My profile / Sign out) and a persistent **← Back** button (returns to the previous page, or home). Both also render in the loading/error states so navigation never disappears; the site menu and back button are hidden in embedded admin mode
+
+## [0.28.0] - 2026-08-07
+### Added
+- **Subscribers can now start a DM with the creator**: a **Message** button (chat bubble icon) appears in the creator hero for followers — on the home page (`/`) and the feed page (`/feed`) — and opens `/chat?recipient={creator_id}`. The chat page gained a **compose mode**: with no existing thread it shows the recipient's name, the DM-policy gate (via `GET /messages/status` — blocked creators show why instead of the composer), and a composer whose first message creates the conversation and drops the user straight into the live thread (WebSocket connected). If an existing thread already exists with that creator, the button opens it directly. The hamburger menu also gained a **Messages** entry (signed-in users) so the inbox is always reachable
+- New `chat` (message bubble) icon
+
 ## [0.27.0] - 2026-08-07
 ### Fixed
 - **Days left now shows on the profile page**: Wompi payment-link webhooks are flat transaction payloads that never report a billing period, so `current_period_end` stayed `NULL` after a paid subscription activated — `GET /me/subscriptions` returned `days_left: null` and the profile's "N days left" card showed "—". The webhook reconciliation now backfills the monthly tier's window: a first payment starts a fresh 30-day period, and a renewal payment while access persists **extends** the window by one month (a provider-reported period always wins; idempotent redeliveries are ledger-deduped so access can't double-extend). Existing live rows with an active status and no period were backfilled from their `created_at`
