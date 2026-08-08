@@ -7,10 +7,12 @@ import '../components/buttons/button.ts'
 import '../components/data/avatar.ts'
 import '../components/media/icon.ts'
 import '../components/media/media-viewer.ts'
+import '../components/stories/story-viewer.ts'
 import '../components/navigation/site-menu.ts'
 import '../components/feedback/spinner.ts'
+import '../components/feedback/toast.ts'
 import { api, ApiError, clearTokens, getAccessToken } from '../lib/api'
-import type { CreatorLanding, SocialLink, UserMe } from '../lib/api'
+import type { CreatorLanding, SocialLink, Story, UserMe } from '../lib/api'
 
 /**
  * Subscriber feed page (`/feed?creator_id={id}`).
@@ -31,6 +33,11 @@ export class SubscriberFeedPage extends LitElement {
   @state() private me: UserMe | null = null
   /** Full-screen viewer state: urls + index, or null when closed. */
   @state() private viewer: { urls: string[]; index: number } | null = null
+  /** Story viewer state: loaded stories, or null when closed. */
+  @state() private stories: Story[] | null = null
+  @state() private storyIndex = 0
+  @state() private storyLoading = false
+  @state() private storyToast = ''
 
   static styles = css`
     :host {
@@ -201,6 +208,33 @@ export class SubscriberFeedPage extends LitElement {
       color: inherit;
     }
 
+    /* --- Story tray (green MSN ring = live story) --- */
+    .story-tray {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 14px;
+      padding: 8px 10px;
+      background: linear-gradient(
+        to bottom,
+        rgba(255, 255, 255, 0.8),
+        rgba(220, 240, 230, 0.5)
+      );
+      border: 1px solid rgba(46, 184, 46, 0.35);
+      border-radius: 6px;
+    }
+
+    .story-tray .tray-label {
+      font-size: 12px;
+      color: #2e6b2e;
+      font-weight: 600;
+    }
+
+    .story-tray .tray-sub {
+      font-size: 11px;
+      color: #55805a;
+    }
+
     .prompt {
       text-align: center;
       padding: 22px 16px;
@@ -268,6 +302,42 @@ export class SubscriberFeedPage extends LitElement {
         return 'tiktok'
       default:
         return 'link'
+    }
+  }
+
+  private _storyToastFor(message: string) {
+    this.storyToast = message
+    window.setTimeout(() => {
+      if (this.storyToast === message) this.storyToast = ''
+    }, 5000)
+  }
+
+  private async _openStoryViewer() {
+    if (this.creatorId === null || this.stories !== null || this.storyLoading) return
+    this.storyLoading = true
+    try {
+      const stories = await api.getCreatorStories(this.creatorId)
+      if (stories.length === 0) {
+        // The ring can be a beat stale — nothing to show, just clear it.
+        this._storyToastFor("This creator's story just ended.")
+      } else {
+        this.stories = stories
+        this.storyIndex = 0
+      }
+    } catch (e) {
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+        // Followers only — anonymous visitors need an account first, everyone
+        // else the subscription.
+        const next = encodeURIComponent(window.location.pathname + window.location.search)
+        window.location.href =
+          e.status === 401 ? `/login?next=${next}` : `/checkout?creator_id=${this.creatorId}`
+        return
+      }
+      this._storyToastFor(
+        e instanceof ApiError ? e.message : 'Could not load the story.',
+      )
+    } finally {
+      this.storyLoading = false
     }
   }
 
@@ -353,16 +423,20 @@ export class SubscriberFeedPage extends LitElement {
             <div class="hero-body">
               <div
                 class="hero-avatar"
-                title="View full size"
+                title="${profile.has_active_story ? 'View the live story' : 'View full size'}"
                 @click="${() =>
-                  profile.avatar_url
-                    ? (this.viewer = { urls: [profile.avatar_url], index: 0 })
-                    : null}"
+                  profile.has_active_story
+                    ? this._openStoryViewer()
+                    : profile.avatar_url
+                      ? (this.viewer = { urls: [profile.avatar_url], index: 0 })
+                      : null}"
               >
                 <roque-avatar
                   src="${profile.avatar_url || ''}"
                   alt="${displayName}"
                   size="84"
+                  ?story-active="${profile.has_active_story}"
+                  ?clickable="${profile.has_active_story}"
                 ></roque-avatar>
               </div>
 
@@ -420,6 +494,23 @@ export class SubscriberFeedPage extends LitElement {
           </roque-card>
         </div>
 
+        ${profile.has_active_story
+          ? html`<div class="story-tray">
+              <roque-avatar
+                src="${profile.avatar_url || ''}"
+                alt="${displayName}"
+                size="44"
+                story-active="true"
+                clickable="true"
+                @aero-avatar-click="${this._openStoryViewer}"
+              ></roque-avatar>
+              <div>
+                <div class="tray-label">${displayName}'s story</div>
+                <div class="tray-sub">New photos — available for 24 hours</div>
+              </div>
+            </div>`
+          : nothing}
+
         ${isFollower
           ? html`<roque-subscriber-feed creator-id="${this.creatorId}"></roque-subscriber-feed>`
           : html`<roque-card>
@@ -465,6 +556,24 @@ export class SubscriberFeedPage extends LitElement {
             .index="${this.viewer.index}"
             @aero-close="${() => (this.viewer = null)}"
           ></roque-media-viewer>`
+        : nothing}
+      ${this.stories
+        ? html`<roque-story-viewer
+            .stories="${this.stories}"
+            .index="${this.storyIndex}"
+            creator-name="${displayName}"
+            creator-avatar="${profile.avatar_url || ''}"
+            @aero-close="${() => (this.stories = null)}"
+          ></roque-story-viewer>`
+        : nothing}
+      ${this.storyToast
+        ? html`<roque-toast
+            icon="info"
+            heading="Story"
+            message="${this.storyToast}"
+            visible
+            @aero-toast-closed="${() => (this.storyToast = '')}"
+          ></roque-toast>`
         : nothing}
     `
   }

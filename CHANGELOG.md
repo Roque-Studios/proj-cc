@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.32.2] - 2026-08-08
+### Fixed
+- **Story viewer shows the creator's avatar (and name) again for subscribers**: the story viewer passed the header's avatar/name as kebab-case attributes (`creator-name`, `creator-avatar`), but Lit derives the observed attribute from a camelCase property by *lowercasing* it (`creatorName` → `creatorname`) — not by adding dashes. So the browser never fired `attributeChangedCallback` and the properties stayed empty, leaving the viewer header with a blank name and a fallback initial circle instead of the photo. `creatorName`/`creatorAvatar` now declare their attributes explicitly (`attribute: 'creator-name'` / `'creator-avatar'`, the same convention `roque-avatar`'s `story-active` and the feed's `creator-id` already use)
+
+## [0.32.1] - 2026-08-08
+### Fixed
+- **Story media was invisible behind the reverse proxy**: `GET /stories/{id}/media` returns auth-gated, watermarked image bytes, but nginx only proxied `/content/`, `/preview/` and `/media/` to the API — story urls fell through to the SPA fallback and came back as `index.html`, so the creator dashboard showed a broken thumbnail and the story viewer rendered a black frame. nginx now proxies `/stories/` (and `/messages/` for DM media, same latent gap) with `no-store`, and the vite dev proxy gained `/content`, `/stories` and `/messages` direct proxies to match
+
+## [0.32.0] - 2026-08-08
+### Added
+- **24-hour stories**: creators publish a story (photo(s) + optional caption) from the admin Content tab — it auto-expires exactly 24h after creation. Stories are **follower-only**: the listing (`GET /stories/{creator_id}`) and the watermarked media (`GET /stories/{story_id}/media`) 401 anonymous and 403 non-followers, and expired stories vanish from both (404 on media, empty listing). The public landing payload grows `profile.has_active_story` — while a story is live the creator's avatar wears a green **MSN-style online ring** (home page + feed page hero, plus a "story" tray linking into the viewer), and non-followers who tap it are sent to the checkout. The new `roque-story-viewer` plays stories full-screen with auto-advance progress bars, tap zones, pause (tap middle / space), arrow keys and Esc. Creator dashboard gains a story composer + a live story list with countdown and delete (`GET /creator/stories` lists expired ones too, `DELETE /creator/stories/{id}`)
+- New tables `story` + `story_media` (migration `7a8b9c0d1e2f`); the shared `StoryService` query helpers gate every read path (listing, media, landing flag) on one expiry definition
+- Coverage: `backend/tests/test_stories.py` (23 tests — publishing gates + validation, 24h expiry, follower-only listing, watermarked media serving, landing flag on/off/expired, dashboard list + delete, cross-creator 404)
+
 ## [0.31.0] - 2026-08-07
 ### Added
 - **Password reset flow for every role**: both sign-in pages (`/login` for subscribers, `/admin` for creators) gain a "Forgot password?" link opening a two-step flow — enter the account email to request a reset code, then enter the code + a new password. Backed by `POST /auth/forgot-password` (never reveals whether an account exists; emails the code via SMTP when configured, returns it as `dev_token` in dev/mock setups) and `POST /auth/reset-password` (short-lived, single-purpose `type: "reset"` JWT — an access or refresh token can never be replayed; wrong/expired codes are answered identically). The reset code is a new `roque-password-reset` component shared by both login pages

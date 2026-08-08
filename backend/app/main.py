@@ -18,6 +18,7 @@ from .routers import (
     posts,
     public,
     realtime,
+    stories,
     subscriptions,
     viewer,
     webhooks,
@@ -41,6 +42,8 @@ app.include_router(webhooks.router)
 app.include_router(subscriptions.router)
 app.include_router(posts.router)
 app.include_router(public.router)
+app.include_router(stories.router)
+app.include_router(stories.dashboard_router)
 app.include_router(content.router)
 app.include_router(media_public.router)
 app.include_router(admin.router)

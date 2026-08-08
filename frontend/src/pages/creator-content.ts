@@ -11,7 +11,7 @@ import '../components/feedback/alert.ts'
 import '../components/feedback/spinner.ts'
 import '../components/data/badge.ts'
 import { api, ApiError, clearTokens, getAccessToken } from '../lib/api'
-import type { CreatorMedia, CreatorPost } from '../lib/api'
+import type { CreatorMedia, CreatorPost, Story } from '../lib/api'
 
 /**
  * Creator content dashboard: every post/broadcast with its engagement stats
@@ -40,6 +40,18 @@ export class CreatorContentManager extends LitElement {
   @state() private composePrice = ''
   @state() private composeError = ''
   @state() private publishing = false
+  // --- 24-hour stories ---
+  @state() private stories: Story[] = []
+  @state() private storiesLoading = true
+  @state() private storyComposing = false
+  @state() private storyCaption = ''
+  @state() private storyPicks: { file: File; preview: string }[] = []
+  @state() private storyError = ''
+  @state() private storyPublishing = false
+  @state() private storyDeleting: number | null = null
+  /** Countdown refresh tick (seconds) so live expiry labels stay current. */
+  @state() private storyTick = 0
+  private _storyTickTimer: number | null = null
 
   static styles = css`
     :host {
@@ -328,11 +340,97 @@ export class CreatorContentManager extends LitElement {
     .empty-cta {
       margin-top: 12px;
     }
+
+    /* --- 24-hour story section --- */
+    .stories-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .stories-title {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: #1e395b;
+    }
+
+    .stories-sub {
+      margin: 3px 0 0;
+      font-size: 12px;
+      color: #5a6a7a;
+      line-height: 1.5;
+      max-width: 480px;
+    }
+
+    .stories-empty {
+      padding: 14px;
+      text-align: center;
+      color: #6b7a8a;
+      font-size: 12px;
+      border: 1px dashed #c8d4de;
+      border-radius: 4px;
+      background: #f8fbfd;
+    }
+
+    .stories-row {
+      display: flex;
+      gap: 12px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .story-tile {
+      flex: 0 0 150px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .story-thumb {
+      width: 150px;
+      height: 150px;
+      object-fit: cover;
+      border: 1px solid #2eb82e;
+      border-radius: 6px;
+      background: #eef3f7;
+      box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(46, 184, 46, 0.6);
+    }
+
+    .story-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .story-time {
+      font-size: 11px;
+      color: #2e6b2e;
+      font-weight: 600;
+      white-space: nowrap;
+    }
   `
 
   async connectedCallback() {
     super.connectedCallback()
     await this._load()
+    await this._loadStories()
+    // Refresh the stories' live countdown every 30s (and force a render tick).
+    this._storyTickTimer = window.setInterval(() => {
+      this.storyTick += 1
+    }, 30_000)
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback()
+    if (this._storyTickTimer !== null) {
+      window.clearInterval(this._storyTickTimer)
+      this._storyTickTimer = null
+    }
   }
 
   private async _load() {
@@ -377,6 +475,271 @@ export class CreatorContentManager extends LitElement {
     window.setTimeout(() => {
       this.toastVisible = false
     }, 5000)
+  }
+
+  // ------------------------------------------------------------------ #
+  // Stories
+  // ------------------------------------------------------------------ #
+
+  private async _loadStories() {
+    this.storiesLoading = true
+    try {
+      this.stories = await api.getCreatorOwnStories()
+    } catch (err) {
+      this._handleError(err)
+    } finally {
+      this.storiesLoading = false
+    }
+  }
+
+  private _openStoryComposer() {
+    this.storyCaption = ''
+    this.storyError = ''
+    this._releaseStoryPicks()
+    this.storyPicks = []
+    this.storyComposing = true
+  }
+
+  private _closeStoryComposer() {
+    if (this.storyPublishing) return
+    this.storyComposing = false
+    this._releaseStoryPicks()
+    this.storyPicks = []
+    this.storyError = ''
+  }
+
+  private _releaseStoryPicks() {
+    for (const pick of this.storyPicks) {
+      URL.revokeObjectURL(pick.preview)
+    }
+  }
+
+  private _onStoryFilesPicked(e: Event) {
+    if (this.storyPublishing) return
+    const input = e.target as HTMLInputElement
+    const files = Array.from(input.files ?? [])
+    input.value = '' // allow re-picking the same file
+    if (files.length === 0) return
+    this.storyPicks = [
+      ...this.storyPicks,
+      ...files.map((file) => ({ file, preview: URL.createObjectURL(file) })),
+    ]
+    this.storyError = ''
+  }
+
+  private _removeStoryPick(index: number) {
+    URL.revokeObjectURL(this.storyPicks[index].preview)
+    this.storyPicks = this.storyPicks.filter((_, i) => i !== index)
+  }
+
+  private async _publishStory() {
+    if (this.storyPublishing) return
+    this.storyError = ''
+    if (this.storyPicks.length === 0) {
+      this.storyError = 'Add at least one photo to publish a story.'
+      return
+    }
+    const oversized = this.storyPicks.find((p) => p.file.size > 10 * 1024 * 1024)
+    if (oversized) {
+      this.storyError = `${oversized.file.name} is larger than the 10 MB per-file limit.`
+      return
+    }
+
+    this.storyPublishing = true
+    try {
+      const created = await api.createStory(
+        this.storyPicks.map((p) => p.file),
+        this.storyCaption,
+      )
+      this.storyComposing = false
+      this._releaseStoryPicks()
+      this.storyPicks = []
+      this.storyCaption = ''
+      this.stories = [created, ...this.stories]
+      this._toast(
+        'Story published',
+        "It's live for your subscribers and disappears in 24 hours.",
+      )
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 413) {
+        this.storyError = 'One of the files exceeds the 10 MB size limit.'
+      } else if (err instanceof ApiError && err.status === 401) {
+        this._handleError(err)
+      } else {
+        this.storyError =
+          err instanceof Error ? err.message : 'Could not publish — please try again.'
+      }
+    } finally {
+      this.storyPublishing = false
+    }
+  }
+
+  private async _deleteStory(story: Story) {
+    if (this.storyDeleting !== null) return
+    this.storyDeleting = story.id
+    this.error = ''
+    try {
+      await api.deleteStory(story.id)
+      this.stories = this.stories.filter((s) => s.id !== story.id)
+      this._toast('Story deleted', 'It is no longer visible to subscribers.')
+    } catch (err) {
+      this._handleError(err)
+    } finally {
+      this.storyDeleting = null
+    }
+  }
+
+  private _storyLivesLeft(story: Story): string {
+    const ms = new Date(story.expires_at).getTime() - Date.now()
+    if (ms <= 0) return 'expired'
+    const hours = Math.floor(ms / 3_600_000)
+    const minutes = Math.floor((ms % 3_600_000) / 60_000)
+    if (hours > 0) return `${hours}h ${minutes}m left`
+    return `${Math.max(minutes, 1)}m left`
+  }
+
+  private _storyThumb(story: Story): string {
+    const url = story.media[0]?.media_url
+    if (!url) return ''
+    const token = getAccessToken()
+    return token ? `${url}&token=${encodeURIComponent(token)}` : url
+  }
+
+  private _renderStoryComposer() {
+    return html`
+      <roque-dialog
+        windowTitle="Publish a 24-hour story"
+        ?open="${this.storyComposing}"
+        @aero-cancel="${this._closeStoryComposer}"
+      >
+        <div class="composer">
+          <p class="dialog-note">
+            Stories appear at the top of your page for subscribers and vanish
+            after 24 hours. Add a photo (or a few) and an optional caption.
+          </p>
+
+          <roque-textarea
+            label="Caption (optional)"
+            rows="2"
+            placeholder="A glimpse into your day…"
+            .value="${this.storyCaption}"
+            @aero-input="${(e: CustomEvent) =>
+              (this.storyCaption = e.detail?.value ?? '')}"
+          ></roque-textarea>
+
+          <div class="upload-row">
+            <label class="file-picker" for="story-files">
+              <span>＋ Add photos</span>
+              <span class="file-hint">JPG · PNG · WEBP · GIF — up to 10 MB each</span>
+            </label>
+            <input
+              id="story-files"
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              multiple
+              hidden
+              @change="${this._onStoryFilesPicked}"
+            />
+          </div>
+
+          ${this.storyPicks.length > 0
+            ? html`<div class="picks">
+                ${this.storyPicks.map(
+                  (pick, i) => html`
+                    <div class="pick">
+                      <img src="${pick.preview}" alt="" />
+                      <button
+                        class="pick-remove"
+                        aria-label="Remove photo"
+                        ?disabled="${this.storyPublishing}"
+                        @click="${() => this._removeStoryPick(i)}"
+                      >×</button>
+                    </div>
+                  `,
+                )}
+              </div>`
+            : ''}
+
+          ${this.storyError
+            ? html`<roque-alert
+                type="error"
+                heading="Cannot publish"
+                message="${this.storyError}"
+                @aero-dismiss="${() => (this.storyError = '')}"
+              ></roque-alert>`
+            : ''}
+        </div>
+        <div slot="actions">
+          <roque-button
+            buttonId="story-cancel"
+            @aero-click="${this._closeStoryComposer}"
+            >Cancel</roque-button
+          >
+          <roque-button
+            context="submit"
+            buttonId="story-publish"
+            @aero-click="${this._publishStory}"
+            >${this.storyPublishing ? 'Publishing…' : 'Publish story'}</roque-button
+          >
+        </div>
+      </roque-dialog>
+    `
+  }
+
+  private _renderStoriesSection() {
+    return html`
+      <roque-card>
+        <div class="stories-head">
+          <div>
+            <h2 class="stories-title">24-hour story</h2>
+            <p class="stories-sub">
+              A photo (or a few) that appears at the top of your page for
+              subscribers — it auto-expires after 24 hours.
+            </p>
+          </div>
+          <roque-button
+            context="submit"
+            buttonId="new-story-btn"
+            @aero-click="${this._openStoryComposer}"
+            >Publish story</roque-button
+          >
+        </div>
+
+        ${this.storiesLoading
+          ? html`<div class="stories-empty">
+              <roque-spinner size="20" label="Loading…"></roque-spinner>
+            </div>`
+          : this.stories.length === 0
+            ? html`<div class="stories-empty">
+                No active story right now. Publish one to show the green
+                story ring on your page.
+              </div>`
+            : html`<div class="stories-row">
+                ${this.stories.map(
+                  (story) => html`
+                    <div class="story-tile">
+                      <img
+                        class="story-thumb"
+                        src="${this._storyThumb(story)}"
+                        alt=""
+                      />
+                      <div class="story-meta">
+                        <span class="story-time">${this._storyLivesLeft(story)}</span>
+                        <roque-button
+                          context="clear"
+                          buttonId="delete-story-${story.id}"
+                          class="danger"
+                          ?disabled="${this.storyDeleting === story.id}"
+                          @aero-click="${() => this._deleteStory(story)}"
+                          >${this.storyDeleting === story.id ? 'Deleting…' : 'Delete'}</roque-button
+                        >
+                      </div>
+                    </div>
+                  `,
+                )}
+              </div>`}
+      </roque-card>
+    `
   }
 
   private _handleError(err: unknown) {
@@ -765,6 +1128,8 @@ export class CreatorContentManager extends LitElement {
           </div>
         </div>
 
+        ${this._renderStoriesSection()}
+
         <div class="stats-bar">
           <div class="stat">
             <div class="value">${this.posts.length}</div>
@@ -809,6 +1174,7 @@ export class CreatorContentManager extends LitElement {
       </div>
 
       ${this._renderComposer()}
+      ${this._renderStoryComposer()}
       ${this._renderEditDialog()}
       ${this._renderDeleteDialog()}
 

@@ -46,6 +46,7 @@ from ..schemas import (
     ViewerLandingOut,
 )
 from ..services.gateways import enabled_configured_gateways
+from ..services.stories import StoryService
 
 router = APIRouter(prefix="/creators", tags=["public"])
 
@@ -104,6 +105,10 @@ def _landing_payload(
             avatar_url=profile.avatar_url if profile else None,
             banner_url=profile.banner_url if profile else None,
             post_count=post_count,
+            # Public signal that the creator has a live story — turns the
+            # avatar indicator green. The story *content* stays follower-only;
+            # the badge itself is public (like an online presence dot).
+            has_active_story=StoryService(db).has_active_story(creator.id),
         ),
         social_links=_social_links(profile) if profile else [],
         viewer=ViewerLandingOut(

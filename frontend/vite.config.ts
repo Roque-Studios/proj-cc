@@ -22,6 +22,20 @@ export default defineConfig({
         target: process.env.API_TARGET || 'http://localhost:8000',
         changeOrigin: true,
       },
+      // Auth-gated media served directly to <img> tags (watermarked post / story
+      // / message media) — mirrors the nginx production proxy.
+      '/content': {
+        target: process.env.API_TARGET || 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/stories': {
+        target: process.env.API_TARGET || 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/messages': {
+        target: process.env.API_TARGET || 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
   build: {

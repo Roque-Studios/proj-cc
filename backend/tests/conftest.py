@@ -36,6 +36,8 @@ from app.models import (
     Post,
     PostMedia,
     ProcessedWebhookEvent,
+    Story,
+    StoryMedia,
     Subscription,
     User,
 )
@@ -82,6 +84,8 @@ def _clean_db():
         db.query(PaidMessageUnlock).delete()  # FKs to message + user
         db.query(MessageMedia).delete()  # FK to message
         db.query(Payment).delete()  # FKs to user (post_id is intentionally not a FK)
+        db.query(StoryMedia).delete()
+        db.query(Story).delete()
         db.query(PostMedia).delete()
         db.query(Post).delete()
         db.query(Message).delete()  # FK to conversation + user

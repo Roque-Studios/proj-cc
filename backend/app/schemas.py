@@ -251,6 +251,10 @@ class CreatorLandingProfileOut(BaseModel):
     banner_url: str | None = None
     # Number of visible posts the creator has published (the hero's post count).
     post_count: int = 0
+    # Whether the creator has a live (unexpired) 24-hour story — turns the
+    # avatar indicator green on the landing/feed pages. Public: the story
+    # *content* stays follower-only, the badge is just the signal.
+    has_active_story: bool = False
 
 
 class ViewerLandingOut(BaseModel):
@@ -476,6 +480,40 @@ class PostUpdate(BaseModel):
 
     caption: str | None = Field(default=None, max_length=2000)
     is_visible: bool | None = None
+
+
+class StoryMediaOut(BaseModel):
+    """One media file of a 24-hour story (always owner/follower-shaped).
+
+    Story endpoints are auth-gated (creator or active follower), so
+    ``media_url`` is never withheld — unlike post media there is no teaser
+    tier for stories.
+    """
+
+    id: int
+    media_type: str
+    media_url: str | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StoryOut(BaseModel):
+    """A creator's 24-hour story with its media.
+
+    ``expires_at`` tells the client when the story disappears; expired stories
+    are never returned by any endpoint (the creator dashboard is the only
+    place expired stories can still be seen, via ``GET /creator/stories``).
+    """
+
+    id: int
+    creator_id: int
+    caption: str | None
+    expires_at: datetime
+    created_at: datetime
+    media: list[StoryMediaOut]
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SubscriberOut(BaseModel):

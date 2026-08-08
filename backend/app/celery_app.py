@@ -48,6 +48,12 @@ celery_app.conf.update(
             # check keeps cancellations accurate well within a billing day.
             "schedule": 3600.0,
         },
+        "purge-expired-stories": {
+            "task": "tasks.purge_expired_stories",
+            # Hourly housekeeping — expired stories already 404/empty by query;
+            # this removes the rows + storage originals so nothing accumulates.
+            "schedule": 3600.0,
+        },
     },
 )
 

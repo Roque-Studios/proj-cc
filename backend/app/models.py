@@ -581,6 +581,69 @@ class PaidMessageUnlock(Base):
     message = relationship("Message")
 
 
+class Story(Base):
+    """A creator's 24-hour story (follower-only ephemeral content).
+
+    A story is one or more validated images that auto-expire 24 hours after
+    creation (``expires_at``): once expired it is invisible everywhere — the
+    follower listing, media serving, and the green "story live" avatar
+    indicator all stop reporting it. Access gating mirrors posts: only the
+    story's creator and active followers can list it or fetch its media
+    (see ``app.routers.stories``).
+    """
+
+    __tablename__ = "story"
+
+    id = Column(Integer, primary_key=True, index=True)
+    creator_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    caption = Column(Text, nullable=True)
+    # UTC instant at which the story disappears (``created_at`` + 24h).
+    expires_at = Column(DateTime(timezone=True), index=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    media = relationship(
+        "StoryMedia",
+        back_populates="story",
+        cascade="all, delete-orphan",
+        order_by="StoryMedia.id",
+    )
+
+
+class StoryMedia(Base):
+    """A media file attached to a 24-hour story (validated image upload).
+
+    Same private-original model as ``PostMedia``: ``storage_key`` names the
+    unguessable private file and is **never exposed**; clients fetch media
+    through the auth-gated, watermarked ``/stories/{story_id}/media`` endpoint
+    (story creator or active follower only).
+    """
+
+    __tablename__ = "story_media"
+
+    id = Column(Integer, primary_key=True, index=True)
+    story_id = Column(
+        Integer,
+        ForeignKey("story.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    media_type = Column(String(50), nullable=False)  # e.g. image/jpeg
+    storage_key = Column(String(255), unique=True, index=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    story = relationship("Story", back_populates="media")
+
+    @property
+    def media_url(self) -> str:
+        """Public URL for this story media (auth + watermark on fetch)."""
+        return f"/stories/{self.story_id}/media?media_id={self.id}"
+
+
 class CreatorProfile(Base):
     """Creator profile extension (one-to-one with User).
 

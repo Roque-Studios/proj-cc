@@ -187,6 +187,10 @@ export interface LandingProfile {
   avatar_url: string | null
   banner_url: string | null
   post_count: number
+  // True while the creator has a live (unexpired) 24-hour story — turns the
+  // avatar indicator green (MSN-online style). Public signal; the story
+  // *content* stays follower-only.
+  has_active_story?: boolean
 }
 
 export interface LandingViewer {
@@ -226,6 +230,22 @@ export interface FeedResponse {
   page_size: number
   total: number
   has_more: boolean
+}
+
+export interface StoryMedia {
+  id: number
+  media_type: string
+  media_url: string | null
+  created_at: string
+}
+
+export interface Story {
+  id: number
+  creator_id: number
+  caption: string | null
+  expires_at: string
+  created_at: string
+  media: StoryMedia[]
 }
 
 export interface SubscribeResult {
@@ -504,6 +524,30 @@ export const api = {
 
   deleteCreatorAvatar(): Promise<CreatorProfile> {
     return request<CreatorProfile>('/creator/avatar', { method: 'DELETE' })
+  },
+
+  // ---- 24-hour stories ----
+
+  createStory(files: File[], caption?: string): Promise<Story> {
+    const form = new FormData()
+    for (const file of files) form.append('files', file)
+    const trimmed = (caption ?? '').trim()
+    if (trimmed) form.append('caption', trimmed)
+    return request<Story>('/stories', { method: 'POST', body: form })
+  },
+
+  // Follower-gated: the creator's live (unexpired) stories.
+  getCreatorStories(creatorId: number): Promise<Story[]> {
+    return request<Story[]>(`/stories/${creatorId}`)
+  },
+
+  // Creator dashboard: every own story, expired ones included.
+  getCreatorOwnStories(): Promise<Story[]> {
+    return request<Story[]>('/creator/stories')
+  },
+
+  deleteStory(storyId: number): Promise<void> {
+    return request<void>(`/creator/stories/${storyId}`, { method: 'DELETE' })
   },
 
   getCreatorFeed(creatorId: number, page = 1, pageSize = 10): Promise<FeedResponse> {

@@ -11,6 +11,7 @@ flips non-renewing subscriptions to canceled after their period ends, and
 from __future__ import annotations
 
 import smtplib
+from datetime import datetime, timezone
 from email.message import EmailMessage
 
 import structlog
@@ -20,9 +21,28 @@ from .celery_app import celery_app
 from .config import settings
 from .database import SessionLocal
 from .models import Subscription, User
+from .services.stories import StoryService
 from .services.subscriptions import SubscriptionService
 
 logger = structlog.get_logger()
+
+
+@celery_app.task(name="tasks.purge_expired_stories")
+def purge_expired_stories() -> int:
+    """Scheduled (beat): delete expired 24-hour stories + their originals.
+
+    Stories auto-expire by query (every read path filters ``expires_at``), so
+    this sweep is purely housekeeping: expired rows and their private storage
+    originals would otherwise accumulate forever. Runs in the worker process
+    with its own DB session. Returns the number of stories purged.
+    """
+    db: Session = SessionLocal()
+    try:
+        count = StoryService(db).purge_expired()
+        logger.info("purged expired stories", count=count)
+        return count
+    finally:
+        db.close()
 
 
 @celery_app.task(name="tasks.debug_ping", bind=True)
