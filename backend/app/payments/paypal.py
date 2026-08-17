@@ -199,8 +199,21 @@ class PayPalPaymentProvider(PaymentProvider):
         return f"pp_customer_{email}"
 
     def create_subscription(self, intent: SubscriptionIntent) -> SubscriptionResult:
+        # Fail fast on a plan id that can't be a PayPal billing plan (``P-...``):
+        # the gateway rejects a foreign id (e.g. the Stripe placeholder default
+        # ``price_monthly_tier``) with a cryptic INVALID_REQUEST 400, so raise a
+        # clear, actionable error before any request is made.
+        plan_id = (intent.plan_id or "").strip()
+        if not plan_id.startswith("P-"):
+            raise ProviderConfigurationError(
+                "PayPal subscriptions require a billing plan id that starts "
+                f"with 'P-' (got '{plan_id}'). Create the monthly billing plan "
+                "with `python -m app.payments.bootstrap_paypal` and set "
+                "SUBSCRIPTION_TIER_PLAN_ID (or the creator's PayPal 'plan id') "
+                "to the printed P-... id."
+            )
         body = {
-            "plan_id": intent.plan_id,
+            "plan_id": plan_id,
             "application_context": {
                 "brand_name": "Content Creator Engine",
                 "user_action": "SUBSCRIBE_NOW",

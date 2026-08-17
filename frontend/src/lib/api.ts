@@ -50,7 +50,20 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   try {
     resp = await fetch(`/api${path}`, { ...options, headers })
   } catch {
-    throw new ApiError(0, 'Network error — is the API reachable?')
+    // fetch() only rejects when the request never produced a response. That
+    // can mean the backend is genuinely down — but when the page loaded fine
+    // and only this request fails, the browser itself blocked it: Chromium's
+    // Private Network Access enforcement (surfaces as net::ERR_ACCESS_DENIED;
+    // Firefox/LibreWolf don't do this), mixed-content blocking, or an
+    // extension. Say so instead of the old misleading "is the API reachable?"
+    // (the API may be perfectly reachable — the dashboard just loaded).
+    throw new ApiError(
+      0,
+      'Network error — the request never reached the server. If the page ' +
+        'loads but this request fails, the browser blocked it (Chromium ' +
+        'Private Network Access, mixed content, or an extension); try ' +
+        'incognito mode or another browser.',
+    )
   }
 
   if (resp.status === 401) {
@@ -548,6 +561,16 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(payload),
     })
+  },
+
+  // Create the gateway's monthly billing plan (PayPal) with the creator's
+  // stored credentials and save the returned P-... id into their config — no
+  // hand-entering plan ids or running the bootstrap script.
+  createGatewayPlan(gateway: string): Promise<GatewaySettings> {
+    return request<GatewaySettings>(
+      `/creator/gateway-settings/${gateway}/plan`,
+      { method: 'POST' },
+    )
   },
 
   getMessagingSettings(): Promise<MessagingSettings> {

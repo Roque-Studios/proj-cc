@@ -300,6 +300,71 @@ def test_resolve_plan_id_prefers_creator_plan_then_env():
     from app.config import settings
     from app.payments.factory import resolve_plan_id
 
+    # A creator-pinned plan wins when it looks like the gateway's own id.
     assert resolve_plan_id("paypal", {"plan_id": "P-ABC123"}) == "P-ABC123"
-    assert resolve_plan_id("paypal", {}) == settings.SUBSCRIPTION_TIER_PLAN_ID
+    assert resolve_plan_id("stripe", {"plan_id": "price_monthly_1"}) == "price_monthly_1"
+    # Gateways that don't send a plan id (Wompi payment links) skip validation.
     assert resolve_plan_id("wompi", {"plan_id": "   "}) == settings.SUBSCRIPTION_TIER_PLAN_ID
+
+
+def test_resolve_plan_id_rejects_non_paypal_plan_id():
+    """A plan id that can't be a PayPal billing plan fails fast with a clear error.
+
+    Regression guard: the platform default ``SUBSCRIPTION_TIER_PLAN_ID`` is the
+    Stripe placeholder ``price_monthly_tier``; without this check it was sent to
+    PayPal, which rejected it with a cryptic ``INVALID_REQUEST`` 400 (PayPal plan
+    ids look like ``P-...``).
+    """
+    from app.payments import ProviderConfigurationError
+    from app.payments.factory import resolve_plan_id
+
+    # No creator plan -> falls back to the env default, which isn't a PayPal id.
+    with pytest.raises(ProviderConfigurationError, match="P-"):
+        resolve_plan_id("paypal", {})
+    # A creator-pinned plan that isn't a PayPal id is rejected too.
+    with pytest.raises(ProviderConfigurationError, match="price_monthly_tier"):
+        resolve_plan_id("paypal", {"plan_id": "price_monthly_tier"})
+
+
+def test_resolve_plan_id_rejects_non_stripe_plan_id():
+    from app.payments import ProviderConfigurationError
+    from app.payments.factory import resolve_plan_id
+
+    with pytest.raises(ProviderConfigurationError, match="price_"):
+        resolve_plan_id("stripe", {"plan_id": "P-ABC123"})
+
+
+def test_subscribe_paypal_without_plan_id_generic_502(client, stub_build):
+    """A creator's PayPal gateway with no plan id -> generic 502, no leak.
+
+    The checkout must never send a foreign plan id (the Stripe placeholder
+    default) to PayPal — and the operator-facing reason (billing-plan setup)
+    must never reach the subscriber: they get a generic "payment method
+    temporarily unavailable" message, the technical detail only goes to the
+    server log.
+    """
+    headers, creator_id = _make_creator(client, "creator@example.com")
+    _configure(
+        client, headers, "paypal",
+        enabled=True,
+        config={"client_id": "c", "client_secret": "d", "webhook_id": "e"},
+    )
+    sub_headers = _register(client, "sub@example.com")
+    resp = client.post(
+        "/subscribe",
+        json={
+            "creator_id": creator_id,
+            "provider": "paypal",
+            "accepted_tos": True,
+            "age_confirmed": True,
+        },
+        headers=sub_headers,
+    )
+    assert resp.status_code == 502
+    detail = resp.json()["detail"]
+    assert "temporarily unavailable" in detail.lower()
+    # No operator-facing internals (bootstrap instructions, plan-id shapes).
+    assert "billing plan" not in detail.lower()
+    assert "P-" not in detail
+    assert "bootstrap" not in detail.lower()
+    assert stub_build == [("paypal", {"client_id": "c", "client_secret": "d", "webhook_id": "e"})]

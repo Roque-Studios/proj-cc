@@ -93,8 +93,13 @@ fallback to platform env keys for checkout** — a gateway only appears in a
 subscriber's checkout once the creator enabled it with a complete config.
 
 Required credentials per gateway: **Stripe** — secret key + webhook secret;
-**PayPal** — client id, client secret, webhook id (+ environment, optional
-plan id); **Wompi** — `WOMPI_CLIENT_ID` + `WOMPI_CLIENT_SECRET` + the
+**PayPal** — client id, client secret, webhook id (+ environment). The
+monthly `P-...` billing plan is created from the settings page's **Create
+billing plan** button using the creator's **own stored credentials** — no
+plan id to type or bootstrap script to run (when omitted, checkout falls back
+to the platform `SUBSCRIPTION_TIER_PLAN_ID`, which must itself be a valid
+PayPal plan id, else checkout fails fast); **Wompi** — `WOMPI_CLIENT_ID` +
+`WOMPI_CLIENT_SECRET` + the
 **webhook URL** (`POST /api/webhooks/wompi` — required, since Wompi only
 notifies payment links through it), plus optional environment and redirect
 URLs; **mock** — none (a zero-config dev gateway, backend-only, hidden from
@@ -108,9 +113,17 @@ the settings UI).
   silently resets them.
 - `PUT /api/creator/gateway-settings/{gateway}` — update the enabled flag and
   config. Enabling a gateway with incomplete required config is a `400`
-  listing the missing fields; constrained values (environments) are
-  validated. Config merges over stored values — empty strings
+  listing the missing fields; constrained values (environments) and the
+  **plan-id shape** (a PayPal plan id must start with `P-`) are validated at
+  save time, so a bad plan id fails with a clear `400` in the settings page
+  instead of at checkout. Config merges over stored values — empty strings
   keep the existing secret, so updates never wipe what the client can't see.
+- `POST /api/creator/gateway-settings/{gateway}/plan` — creator-only; creates
+  the gateway's monthly billing plan (PayPal only) with the creator's
+  **stored credentials** at their tier price and saves the returned `P-...`
+  id into their config — the settings page's **Create billing plan** button.
+  (The platform-level plan is still created by `python -m
+  app.payments.bootstrap_paypal` against the env credentials.)
 - `GET /api/creators/{creator_id}/gateways` — public; the gateways a
   subscriber can pay with (**only** enabled + configured ones), so checkout
   UI renders exactly what the creator accepts.
@@ -141,9 +154,13 @@ from the `roque-*` components: cards, switches, text fields, badges, toasts;
    config is complete (the backend enforces the same rule). Secret fields are
    password-masked and their values are never shown back — a field marked
    "✓ saved" keeps its value when you leave it blank, and a new value
-   replaces it. The settings tab renders the gateway cards even if the
-   profile/messaging panels fail, and lazy profile creation is race-safe, so
-   a first visit never blanks the page.
+   replaces it. For **PayPal**, once the client credentials are saved a
+   **Create billing plan** button creates the monthly `P-...` plan at your
+   subscription price and saves the id automatically — no plan id to look
+   up, and the green checks stay honest because a plan id that can't belong
+   to the gateway is rejected at save time. The settings tab renders the
+   gateway cards even if the profile/messaging panels fail, and lazy profile
+   creation is race-safe, so a first visit never blanks the page.
 
 The frontend uses a token-based fetch client (`frontend/src/lib/api.ts`,
 Bearer access token in localStorage); in dev, `yarn dev` proxies `/api/*` to
@@ -153,6 +170,19 @@ non-echo, merge semantics), `test_gateway_subscribe.py` (checkout listing +
 strict per-creator resolution + factory mapping), and
 `test_gateway_webhooks.py` (per-creator webhook secret matching, forged
 rejection).
+
+**Troubleshooting — uploads fail in Chromium but work in Firefox/LibreWolf**
+— if a dashboard upload (avatar, banner, post, story) fails with
+`net::ERR_ACCESS_DENIED` in the browser's network panel while the backend
+logs stay empty, the **browser** blocked the request before it ever reached
+nginx. The usual cause is Chromium's **Private Network Access** enforcement
+(Firefox/LibreWolf don't enforce it), a privacy extension, or a
+`chrome://flags` setting; the page loading fine while only the upload fails
+is the giveaway that the API is reachable. Try the upload in **incognito
+mode** (extensions off), disable the `block-insecure-private-network-requests`
+flag, or use another browser. The API client now surfaces this case with an
+explicit "the browser blocked the request… try incognito or another browser"
+message instead of a misleading "is the API reachable?".
 
 ### Photo posts (creator uploads)
 
@@ -627,7 +657,15 @@ OAuth2 client-credentials auth, hosted subscription approval links, cancel,
 and POST-back webhook verification.
 
 **Billing plan bootstrap** — PayPal requires the monthly billing plan to exist
-at the gateway before it accepts subscriptions. Create it once per environment:
+at the gateway before it accepts subscriptions. **Per-creator plans are
+created from the admin settings page** (the **Create billing plan** button,
+`POST /api/creator/gateway-settings/paypal/plan`): it builds the provider from
+the creator's own stored PayPal credentials and tier price, creates the plan
+at the gateway, and saves the returned `P-...` id into their config
+automatically. The platform-level plan (used when a creator hasn't pinned
+one) is created once per environment with the bootstrap script — it needs the
+**env** credentials, so it only works where `PAYPAL_CLIENT_ID` /
+`PAYPAL_CLIENT_SECRET` are set:
 
 ```bash
 docker compose exec api python -m app.payments.bootstrap_paypal
@@ -640,6 +678,18 @@ This creates the catalog product (unless `PAYPAL_PRODUCT_ID` is set) and an
 the printed plan id is what `SUBSCRIPTION_TIER_PLAN_ID` must hold (PayPal plan
 ids look like `P-...`). In production, create the plan in the live app and
 repeat with the live credentials.
+
+**Plan-id validation** — the backend validates the resolved plan id's shape
+**before** calling PayPal (fail fast): `SUBSCRIPTION_TIER_PLAN_ID` and any
+creator-pinned PayPal `plan id` must start with `P-`. The default value
+(`price_monthly_tier`) is a Stripe-style placeholder, so PayPal enabled
+without a real plan id fails fast at checkout instead of PayPal's cryptic
+`INVALID_REQUEST` error on `/plan_id`. **Subscribers never see the
+operator-facing reason**: `POST /subscribe` answers a generic `502` ("…this
+creator's payment method is temporarily unavailable…") and logs the
+actionable detail server-side. Creators fix it from the settings page (the
+Create billing plan button), and the settings form itself rejects a plan id
+that can't belong to the gateway with a clear `400` at save time.
 
 **Webhooks** — register `POST /api/webhooks/paypal` as the webhook URL in the
 PayPal app (sandbox or live) for `BILLING.SUBSCRIPTION.APPROVED` /

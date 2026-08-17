@@ -40,7 +40,11 @@ from app.models import (
     User,
     UserRole,
 )
-from app.payments import ProviderConfigurationError, WebhookVerificationError
+from app.payments import (
+    ProviderConfigurationError,
+    SubscriptionIntent,
+    WebhookVerificationError,
+)
 from app.payments.paypal import PayPalPaymentProvider
 from app.services.subscriptions import SubscriptionService
 
@@ -244,6 +248,25 @@ def test_paypal_rejects_non_positive_plan_price():
     provider = _paypal_provider(fake_api)
     with pytest.raises(ProviderConfigurationError):
         provider.create_plan("Free tier", 0)
+
+
+def test_paypal_rejects_plan_id_that_is_not_a_billing_plan():
+    """A non-``P-...`` plan id fails fast before any request reaches PayPal.
+
+    Regression guard: the Stripe placeholder default (``price_monthly_tier``)
+    used to be sent to PayPal, which bounced it back as a cryptic
+    ``INVALID_REQUEST`` 400 on ``/plan_id``. The provider now raises a clear
+    ``ProviderConfigurationError`` and no request is made.
+    """
+    fake_api = FakePayPalAPI()
+    provider = _paypal_provider(fake_api)
+    intent = SubscriptionIntent(
+        plan_id="price_monthly_tier",
+        subscriber_email="sub@example.com",
+    )
+    with pytest.raises(ProviderConfigurationError, match="P-"):
+        provider.create_subscription(intent)
+    assert fake_api.subscriptions == {}  # nothing reached the gateway
 
 
 def test_paypal_reuses_configured_product_id():

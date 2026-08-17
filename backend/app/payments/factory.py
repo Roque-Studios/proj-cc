@@ -16,6 +16,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from ..config import settings
+from ..gateways import PLAN_ID_HINTS, PLAN_ID_PREFIXES
 from .base import PaymentProvider, ProviderConfigurationError
 from .mock import MockPaymentProvider
 from .paypal import PayPalPaymentProvider
@@ -94,13 +95,42 @@ def build_provider_from_config(gateway: str, config: dict) -> PaymentProvider:
     return provider_cls.from_settings(merged)
 
 
+# The required plan-id shape per gateway (the value sent as the billing plan
+# must look like the gateway's own plan id) and the operator-facing fix hint
+# live in ``app.gateways`` — the registry also validates them at save time, so
+# the shape rules have a single source of truth.
+
+
+def _validate_plan_id_shape(gateway: str, plan_id: str) -> None:
+    """Reject a plan id that can't belong to the gateway (fail fast, clear msg).
+
+    Raises ``ProviderConfigurationError`` so the caller surfaces an actionable
+    message instead of letting a garbage plan id reach the gateway and bounce
+    back as a cryptic provider 400 (e.g. PayPal rejecting the Stripe
+    placeholder default ``price_monthly_tier``).
+    """
+    prefix = PLAN_ID_PREFIXES.get(gateway)
+    if prefix is None or plan_id.startswith(prefix):
+        return
+    raise ProviderConfigurationError(
+        f"{gateway.title()} subscriptions require a billing plan id that starts "
+        f"with '{prefix}' (got '{plan_id}'). {PLAN_ID_HINTS[gateway]}"
+    )
+
+
 def resolve_plan_id(gateway: str, config: dict) -> str:
     """The billing plan id for a per-creator gateway config.
 
     A creator may pin their own plan (e.g. a PayPal ``P-...`` billing plan they
-    bootstrapped); otherwise the platform's single monthly tier applies.
+    bootstrapped); otherwise the platform's single monthly tier applies. The
+    resolved id is validated against the gateway's required id shape — a
+    misconfigured plan fails fast with a clear ``ProviderConfigurationError``
+    rather than a cryptic rejection from the gateway.
     """
     plan = config.get("plan_id")
     if plan is not None and str(plan).strip():
-        return str(plan).strip()
-    return settings.SUBSCRIPTION_TIER_PLAN_ID
+        plan_id = str(plan).strip()
+    else:
+        plan_id = settings.SUBSCRIPTION_TIER_PLAN_ID
+    _validate_plan_id_shape(gateway, plan_id)
+    return plan_id

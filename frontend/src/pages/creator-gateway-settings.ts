@@ -14,7 +14,7 @@ import '../components/feedback/alert.ts'
 import '../components/feedback/spinner.ts'
 import '../components/data/badge.ts'
 import { api, ApiError, clearTokens } from '../lib/api'
-import type { GatewaySettings } from '../lib/api'
+import type { GatewayField, GatewaySettings } from '../lib/api'
 
 /** Gateways shown in the settings UI (the mock dev gateway stays backend-only). */
 const UI_GATEWAYS = ['stripe', 'paypal', 'wompi']
@@ -33,6 +33,8 @@ export class CreatorGatewaySettings extends LitElement {
   @state() private messagingBusy = false
   @state() private loading = true
   @state() private busy = false
+  // Creating the PayPal billing plan (``POST /creator/gateway-settings/paypal/plan``).
+  @state() private planBusy = false
   @state() private error = ''
   @state() private toast = ''
   @state() private toastHeading = ''
@@ -165,6 +167,26 @@ export class CreatorGatewaySettings extends LitElement {
       text-align: center;
     }
 
+    .plan-zone {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 4px 0 14px;
+      padding: 10px 12px;
+      border: 1px solid #c8d2dc;
+      border-radius: 4px;
+      background: rgba(var(--cc-tint), 0.12);
+    }
+
+    .plan-hint {
+      flex: 1;
+      min-width: 180px;
+      font-size: 11px;
+      color: var(--cc-text-secondary);
+      line-height: 1.4;
+    }
+
     /* --- Public profile (landing hero) --- */
     .avatar-zone {
       display: flex;
@@ -284,6 +306,10 @@ export class CreatorGatewaySettings extends LitElement {
     return this.settings.find((g) => g.gateway === name)
   }
 
+  private _paypalPlanField(): GatewayField | undefined {
+    return this._gateway('paypal')?.fields.find((f) => f.name === 'plan_id')
+  }
+
   private _canEnable(gateway: string): boolean {
     const spec = this._gateway(gateway)
     if (!spec) return false
@@ -351,6 +377,34 @@ export class CreatorGatewaySettings extends LitElement {
     next[idx] = updated
     this.settings = next
     this.enabled = { ...this.enabled, [updated.gateway]: updated.enabled }
+    // Echo non-secret stored values (e.g. the environment select, the PayPal
+    // plan id created via the button) into the form so a save/plan-creation
+    // never leaves the field showing a stale blank.
+    const form = { ...(this.form[updated.gateway] ?? {}) }
+    for (const f of updated.fields) {
+      if (!f.secret && f.value != null) form[f.name] = f.value
+    }
+    this.form = { ...this.form, [updated.gateway]: form }
+  }
+
+  private async _createPaypalPlan() {
+    if (this.planBusy) return
+    this.planBusy = true
+    this.error = ''
+    try {
+      const updated = await api.createGatewayPlan('paypal')
+      this._applyServerState(updated)
+      const planId = this._paypalPlanField()?.value
+      this.toastHeading = 'Billing plan created'
+      this.toast = planId
+        ? `PayPal plan ${planId} is saved — checkout is ready.`
+        : 'The PayPal billing plan was created and saved to your config.'
+      this._showToast()
+    } catch (err) {
+      this._handleError(err)
+    } finally {
+      this.planBusy = false
+    }
   }
 
   private _handleError(err: unknown) {
@@ -907,6 +961,28 @@ export class CreatorGatewaySettings extends LitElement {
               Values marked ✓ are saved. Leave a field blank to keep its
               current value; enter a new one to replace it.
             </p>`
+          : ''}
+
+        ${g.gateway === 'paypal' &&
+        canEnable &&
+        !!this._paypalPlanField() &&
+        !this._paypalPlanField()!.configured
+          ? html`<div class="plan-zone">
+              <roque-button
+                buttonId="create-paypal-plan"
+                context="submit"
+                ?disabled="${this.planBusy}"
+                @aero-click="${this._createPaypalPlan}"
+                >${this.planBusy
+                  ? 'Creating…'
+                  : 'Create billing plan'}</roque-button
+              >
+              <span class="plan-hint">
+                Creates the monthly P-... billing plan in your PayPal account
+                and saves it here automatically, priced at your subscription
+                price.
+              </span>
+            </div>`
           : ''}
 
         <div class="footer-row">

@@ -34,6 +34,8 @@ from ..gateways import (
     validate_enable,
 )
 from ..models import CreatorGatewayConfig, CreatorProfile, User, UserRole
+from ..payments import PaymentProviderError, ProviderConfigurationError
+from ..payments.factory import build_provider_from_config
 from ..schemas import (
     CreatorProfileOut,
     CreatorProfileUpdate,
@@ -43,6 +45,7 @@ from ..schemas import (
     MessagingSettingsOut,
     MessagingSettingsUpdate,
 )
+from ..services.subscriptions import tier_price_cents_for
 from ..storage import get_avatar_storage, get_banner_storage
 
 router = APIRouter(prefix="/creator", tags=["creator"])
@@ -422,6 +425,78 @@ def update_gateway_settings(
     else:
         row.enabled = enabled
         row.config = merged
+    db.commit()
+    db.refresh(row)
+    return _settings_out(gateway, row)
+
+
+@router.post("/gateway-settings/{gateway}/plan", response_model=GatewaySettingsOut)
+def create_gateway_billing_plan(
+    gateway: str,
+    user: User = Depends(require_creator),
+    db: Session = Depends(get_db),
+):
+    """Creator-only: create the gateway's monthly billing plan and save its id.
+
+    PayPal subscriptions require a billing plan that already exists at the
+    gateway (``/v1/billing/subscriptions`` rejects an unknown ``plan_id``).
+    This creates the monthly plan with the creator's **own stored PayPal
+    credentials** at their current tier price and saves the returned ``P-...``
+    id into their gateway config — the normalized flow, so a creator never
+    hand-enters a plan id or runs the bootstrap script (which needs the
+    platform env credentials). Only PayPal supports programmatic plan
+    creation; Stripe prices are created in the Stripe dashboard.
+    """
+    if gateway not in GATEWAYS:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown gateway: {gateway}",
+        )
+    if gateway != "paypal":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Billing plans are only created for PayPal — create the "
+                f"{GATEWAYS[gateway].label} plan in the gateway dashboard."
+            ),
+        )
+    row = db.scalar(
+        select(CreatorGatewayConfig).where(
+            CreatorGatewayConfig.creator_id == user.id,
+            CreatorGatewayConfig.gateway == gateway,
+        )
+    )
+    if row is None or not is_config_complete(gateway, row.config):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Save the PayPal client credentials (Client ID, Client secret, "
+                "Webhook ID) first, then create the billing plan."
+            ),
+        )
+    price_cents = tier_price_cents_for(user.creator_profile)
+    try:
+        provider = build_provider_from_config(gateway, row.config)
+        plan = provider.create_plan(
+            name=(
+                f"Content Creator Engine — Monthly Tier "
+                f"({user.username or user.id})"
+            ),
+            price_cents=price_cents,
+            currency="usd",
+        )
+    except (ProviderConfigurationError, PaymentProviderError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"PayPal could not create the billing plan: {exc}",
+        )
+    plan_id = plan.get("id")
+    if not plan_id:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="PayPal created the billing plan but returned no plan id.",
+        )
+    row.config = {**row.config, "plan_id": str(plan_id)}
     db.commit()
     db.refresh(row)
     return _settings_out(gateway, row)

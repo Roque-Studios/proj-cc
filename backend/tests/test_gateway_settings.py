@@ -344,3 +344,176 @@ def test_settings_are_scoped_to_own_creator(client):
     stripe = next(g for g in listing if g["gateway"] == "stripe")
     assert stripe["enabled"] is False
     assert stripe["configured"] is False
+
+
+# --------------------------------------------------------------------------- #
+# Plan-id shape validation (fail at save, not at checkout)
+# --------------------------------------------------------------------------- #
+
+
+def _paypal_creds() -> dict:
+    return {"client_id": "cid", "client_secret": "csec", "webhook_id": "whid"}
+
+
+def test_plan_id_shape_validated_at_save(client):
+    """A plan id that can't belong to the gateway is rejected when saving.
+
+    A PayPal plan id must start with ``P-`` — the Stripe placeholder default
+    (``price_monthly_tier``) used to be accepted here and only failed at
+    checkout. The settings page now catches it with a clear 400.
+    """
+    headers = _register_and_apply(client, "creator@example.com")
+    resp = client.put(
+        "/creator/gateway-settings/paypal",
+        json={
+            "enabled": False,
+            "config": {**_paypal_creds(), "plan_id": "price_monthly_tier"},
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert "P-" in detail
+    assert "billing plan" in detail.lower()
+
+
+def test_plan_id_valid_shape_saves(client):
+    headers = _register_and_apply(client, "creator@example.com")
+    resp = client.put(
+        "/creator/gateway-settings/paypal",
+        json={
+            "enabled": False,
+            "config": {**_paypal_creds(), "plan_id": "P-ABC123"},
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    plan = next(f for f in resp.json()["fields"] if f["name"] == "plan_id")
+    assert plan["configured"] is True
+    assert plan["value"] == "P-ABC123"
+
+
+def test_stripe_spec_has_no_plan_id_field(client):
+    """Stripe plans are platform-level (env ``SUBSCRIPTION_TIER_PLAN_ID``).
+
+    The settings form exposes no Stripe plan-id field — creators pin a PayPal
+    plan via the dashboard button; the Stripe price comes from the platform
+    env, whose ``price_...`` shape the factory validates at checkout.
+    """
+    headers = _register_and_apply(client, "creator@example.com")
+    resp = client.get("/creator/gateway-settings", headers=headers)
+    stripe = next(g for g in resp.json() if g["gateway"] == "stripe")
+    assert all(f["name"] != "plan_id" for f in stripe["fields"])
+
+
+# --------------------------------------------------------------------------- #
+# Dashboard plan creation (POST /creator/gateway-settings/paypal/plan)
+# --------------------------------------------------------------------------- #
+
+
+class _StubPlanProvider:
+    """Deterministic stand-in for PayPal's plan bootstrap (no network)."""
+
+    name = "paypal"
+
+    def __init__(self) -> None:
+        self.created: list[dict] = []
+
+    def create_plan(self, name, price_cents, currency="usd", product_id=None):
+        self.created.append(
+            {"name": name, "price_cents": price_cents, "currency": currency}
+        )
+        return {"id": "P-CREATED001", "status": "ACTIVE"}
+
+
+def test_create_plan_requires_creator_role(client):
+    headers = _register(client, "reg@example.com")
+    assert (
+        client.post("/creator/gateway-settings/paypal/plan", headers=headers).status_code
+        == 403
+    )
+    assert client.post("/creator/gateway-settings/paypal/plan").status_code == 401
+
+
+def test_create_plan_unknown_gateway_404(client):
+    headers = _register_and_apply(client, "creator@example.com")
+    resp = client.post("/creator/gateway-settings/bitcoin/plan", headers=headers)
+    assert resp.status_code == 404
+
+
+def test_create_plan_only_paypal(client):
+    """Stripe plans are created in the Stripe dashboard, not via the API."""
+    headers = _register_and_apply(client, "creator@example.com")
+    resp = client.post("/creator/gateway-settings/stripe/plan", headers=headers)
+    assert resp.status_code == 400
+    assert "only created for PayPal" in resp.json()["detail"]
+
+
+def test_create_plan_requires_complete_paypal_config(client, monkeypatch):
+    headers = _register_and_apply(client, "creator@example.com")
+    resp = client.post("/creator/gateway-settings/paypal/plan", headers=headers)
+    assert resp.status_code == 400
+    assert "client credentials" in resp.json()["detail"].lower()
+
+
+def test_create_paypal_plan_saves_plan_id(client, monkeypatch):
+    """The dashboard button creates the plan with the creator's creds + price.
+
+    The endpoint builds the provider from the creator's **stored PayPal
+    credentials** (not the platform env — which is why the container bootstrap
+    script failed for a configured dashboard) and saves the returned ``P-...``
+    id into their config so checkout works immediately.
+    """
+    import app.routers.creator as creator_router
+
+    headers = _register_and_apply(client, "creator@example.com")
+    client.put(
+        "/creator/gateway-settings/paypal",
+        json={"enabled": False, "config": _paypal_creds()},
+        headers=headers,
+    )
+    provider = _StubPlanProvider()
+    monkeypatch.setattr(
+        creator_router,
+        "build_provider_from_config",
+        lambda gateway, config: provider,
+    )
+
+    resp = client.post("/creator/gateway-settings/paypal/plan", headers=headers)
+    assert resp.status_code == 200
+    assert provider.created == [
+        {"name": "Content Creator Engine — Monthly Tier (creator)", "price_cents": 500, "currency": "usd"}
+    ]
+    plan = next(f for f in resp.json()["fields"] if f["name"] == "plan_id")
+    assert plan["configured"] is True
+    assert plan["value"] == "P-CREATED001"
+    # The saved plan id survives a listing round-trip.
+    listing = client.get("/creator/gateway-settings", headers=headers).json()
+    paypal = next(g for g in listing if g["gateway"] == "paypal")
+    plan = next(f for f in paypal["fields"] if f["name"] == "plan_id")
+    assert plan["configured"] is True
+    assert plan["value"] == "P-CREATED001"
+
+
+def test_create_paypal_plan_uses_creator_tier_price(client, monkeypatch):
+    """The created plan is priced at the creator's own monthly price."""
+    import app.routers.creator as creator_router
+
+    headers = _register_and_apply(client, "creator@example.com")
+    client.put(
+        "/creator/gateway-settings/paypal",
+        json={"enabled": False, "config": _paypal_creds()},
+        headers=headers,
+    )
+    # Creator sets a $7.50 monthly price.
+    client.put("/creator/profile", json={"tier_price_cents": 750}, headers=headers)
+    provider = _StubPlanProvider()
+    monkeypatch.setattr(
+        creator_router,
+        "build_provider_from_config",
+        lambda gateway, config: provider,
+    )
+
+    resp = client.post("/creator/gateway-settings/paypal/plan", headers=headers)
+    assert resp.status_code == 200
+    assert provider.created[0]["price_cents"] == 750

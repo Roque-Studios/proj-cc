@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -22,7 +23,11 @@ from ..database import get_db
 from ..deps import get_current_user
 from ..gateways import is_config_complete
 from ..models import Subscription, SubscriptionStatus, User, UserRole
-from ..payments import PaymentProvider, ProviderConfigurationError
+from ..payments import (
+    PaymentProvider,
+    PaymentProviderError,
+    ProviderConfigurationError,
+)
 from ..payments.factory import build_provider_from_config, resolve_plan_id
 from ..schemas import (
     CancelRequest,
@@ -37,6 +42,17 @@ from ..services.gateways import enabled_configured_gateways, get_gateway_row
 from ..services.subscriptions import SubscriptionService, tier_price_cents_for
 
 router = APIRouter(tags=["subscriptions"])
+
+logger = structlog.get_logger()
+
+# Subscriber-facing message when a creator's payment gateway is broken or
+# misconfigured. The technical reason is logged server-side (the subscriber
+# can't fix a gateway configuration) — end users only ever see this generic
+# line, never operator instructions like "run bootstrap_paypal".
+_PAYMENT_UNAVAILABLE = (
+    "This creator's payment method is temporarily unavailable. "
+    "Please try again later."
+)
 
 
 @router.post(
@@ -93,19 +109,36 @@ def subscribe(
         )
 
     service = SubscriptionService(db, provider=provider)
-    subscription = service.create_subscription(
-        subscriber_id=user.id,
-        creator_id=creator.id,
-        plan_id=plan_id,
-        success_url=payload.success_url,
-        cancel_url=payload.cancel_url,
-        age_confirmed=payload.age_confirmed,
-        tos_accepted_at=datetime.now(timezone.utc),
-        # The creator's own monthly price (or the platform default) — charged
-        # by amount-based gateways and snapshotted onto the row for the
-        # revenue ledger.
-        amount_cents=tier_price_cents_for(creator.creator_profile),
-    )
+    try:
+        subscription = service.create_subscription(
+            subscriber_id=user.id,
+            creator_id=creator.id,
+            plan_id=plan_id,
+            success_url=payload.success_url,
+            cancel_url=payload.cancel_url,
+            age_confirmed=payload.age_confirmed,
+            tos_accepted_at=datetime.now(timezone.utc),
+            # The creator's own monthly price (or the platform default) —
+            # charged by amount-based gateways and snapshotted onto the row
+            # for the revenue ledger.
+            amount_cents=tier_price_cents_for(creator.creator_profile),
+        )
+    except (ProviderConfigurationError, PaymentProviderError) as exc:
+        # The gateway refused the checkout (e.g. a misconfigured plan id, or
+        # PayPal rejecting the request). That's a creator/server-side problem
+        # — log the actionable detail and answer the subscriber with a
+        # generic message, never the operator-facing reason.
+        logger.error(
+            "subscribe failed at gateway",
+            gateway=gateway,
+            creator_id=creator.id,
+            error=str(exc),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=_PAYMENT_UNAVAILABLE,
+        )
     return SubscribeResponse(
         subscription=SubscriptionOut.model_validate(subscription),
         checkout_url=subscription.checkout_url,
@@ -290,9 +323,22 @@ def _resolve_gateway(
         config = row.config
     try:
         provider = build_provider_from_config(gateway, config)
+        # Resolved inside the try so a plan id that can't belong to the gateway
+        # (e.g. the Stripe placeholder default sent to PayPal) fails fast
+        # instead of a cryptic gateway rejection or a 500.
+        plan_id = resolve_plan_id(gateway, config)
     except ProviderConfigurationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Gateway '{gateway}' configuration is invalid: {exc}",
+        # Operator-facing detail (billing-plan setup instructions) never
+        # reaches the subscriber — log it and answer generically.
+        logger.error(
+            "subscribe gateway misconfigured",
+            gateway=gateway,
+            creator_id=creator_id,
+            error=str(exc),
+            exc_info=True,
         )
-    return gateway, provider, resolve_plan_id(gateway, config)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=_PAYMENT_UNAVAILABLE,
+        )
+    return gateway, provider, plan_id

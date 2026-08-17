@@ -19,6 +19,33 @@ from dataclasses import dataclass, field
 # Registry
 # --------------------------------------------------------------------------- #
 
+# The billing-plan id shape each gateway expects (PayPal ``P-...``, Stripe
+# ``price_...``): a plan id that can't belong to the gateway is rejected at
+# save time (and checkout) instead of bouncing off the gateway with a cryptic
+# schema error (e.g. PayPal's ``INVALID_REQUEST`` on ``/plan_id``). Gateways
+# absent here never send a plan id (Wompi payment links price by amount; mock
+# accepts anything).
+PLAN_ID_PREFIXES: dict[str, str] = {
+    "paypal": "P-",
+    "stripe": "price_",
+}
+
+# Operator-facing fix hint for a plan id that fails the gateway's shape check
+# (surfaced in the settings-form error and in server logs — never to
+# subscribers).
+PLAN_ID_HINTS: dict[str, str] = {
+    "paypal": (
+        "Create the monthly billing plan with the 'Create billing plan' button "
+        "in the payment-gateway settings page — it saves the P-... id to your "
+        "PayPal config automatically (the platform default comes from "
+        "`python -m app.payments.bootstrap_paypal`)."
+    ),
+    "stripe": (
+        "Create a recurring price in the Stripe dashboard and enter its "
+        "price_... id here."
+    ),
+}
+
 
 @dataclass(frozen=True)
 class GatewayField:
@@ -66,7 +93,7 @@ GATEWAYS: dict[str, GatewaySpec] = {
         description=(
             "Recurring subscriptions via PayPal Billing (hosted approval). Use "
             "your REST app credentials and the webhook id from the developer "
-            "dashboard."
+            "dashboard; the monthly billing plan is created from this page."
         ),
         fields=(
             GatewayField("client_id", "Client ID", required=True),
@@ -80,9 +107,9 @@ GATEWAYS: dict[str, GatewaySpec] = {
             ),
             GatewayField(
                 "plan_id",
-                "Billing plan ID (optional)",
+                "Billing plan ID",
                 secret=False,
-                placeholder="P-... (created via bootstrap_paypal)",
+                placeholder="P-... (saved automatically by 'Create billing plan')",
             ),
         ),
     ),
@@ -182,6 +209,18 @@ def validate_config_values(gateway: str, config: dict) -> None:
             raise ValueError(
                 f"{field.label} must be one of: {', '.join(field.options)}"
             )
+        # A stored plan id must look like the gateway's own (PayPal ``P-...``,
+        # Stripe ``price_...``) or checkout would fail at the gateway with a
+        # cryptic schema error — reject it at save time with a clear message so
+        # a bad id can never sneak past the settings page to checkout.
+        if field.name == "plan_id" and str(value).strip():
+            prefix = PLAN_ID_PREFIXES.get(gateway)
+            if prefix is not None and not str(value).strip().startswith(prefix):
+                raise ValueError(
+                    f"{field.label} must start with '{prefix}' for "
+                    f"{GATEWAYS[gateway].label} subscriptions (got '{value}'). "
+                    f"{PLAN_ID_HINTS[gateway]}"
+                )
 
 
 def missing_fields(gateway: str, config: dict) -> list[str]:

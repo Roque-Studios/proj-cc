@@ -164,15 +164,19 @@ def test_period_less_renewal_extends_the_window(db_session):
     A second payment while the row is still active must extend
     ``current_period_end`` (from the current window, not reset it) — otherwise
     the subscriber pays for month 2 but access still lapses after month 1.
+
+    The window is built from the real clock (the service extends from
+    ``max(period_end, now)``), so pinning a fixed date here would go stale.
     """
+    now = datetime.now(timezone.utc)
     with db_session as db:
         subscriber, creator = _subscriber_and_creator(db)
         sub = Subscription(
             subscriber_id=subscriber.id,
             creator_id=creator.id,
             status=SubscriptionStatus.active,
-            current_period_start=NOW - timedelta(days=20),
-            current_period_end=NOW + timedelta(days=10),
+            current_period_start=now - timedelta(days=20),
+            current_period_end=now + timedelta(days=10),
             payment_provider="mock",
             external_ref="sub_wompi_link2",
         )
@@ -190,9 +194,9 @@ def test_period_less_renewal_extends_the_window(db_session):
         db.refresh(sub)
 
         assert sub.status == SubscriptionStatus.active
-        # Extended from the old window end (NOW+10d) by a month, i.e. NOW+40d
-        # — NOT reset to a fresh ~NOW+30d. SQLite returns naive datetimes.
-        expected = NOW + timedelta(days=40)
+        # Extended from the old window end (now+10d) by a month, i.e. now+40d
+        # — NOT reset to a fresh ~now+30d. SQLite returns naive datetimes.
+        expected = now + timedelta(days=40)
         stored = sub.current_period_end.replace(tzinfo=timezone.utc)
         delta = abs((stored - expected).total_seconds())
         assert delta < 120, f"period_end {sub.current_period_end} not extended ~40 days out"
